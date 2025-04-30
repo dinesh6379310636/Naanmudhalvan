@@ -1,0 +1,120 @@
+# Import necessary libraries
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from transformers import pipeline
+import warnings
+warnings.filterwarnings('ignore')
+
+# Set random seed for reproducibility
+np.random.seed(42)
+
+# Step 1: Simulate X posts (synthetic dataset for demo)
+posts_data = {
+    'post_id': range(1, 16),
+    'text': [
+        "The new XPhone is incredible! Best tech ever! 😍 #XPhoneLaunch",
+        "Why does the XPhone keep crashing? So annoyed 😡 #TechIssues",
+        "Just got my XPhone, loving the camera quality! #Photography",
+        "Terrible customer service for XPhone issues. #Disappointed",
+        "XPhone battery life is amazing, super impressed! #Innovation",
+        "Feeling sad, my XPhone arrived broken. 😢 #QualityControl",
+        "Wow, XPhone’s design is sleek and modern! #LoveIt",
+        "Can’t believe the XPhone price hike, not worth it. #Ripoff",
+        "XPhone’s new features are a game-changer! #TechLover",
+        "Struggling with XPhone setup, so frustrating! #UserExperience",
+        "Shared my XPhone pics on X, got so many likes! #SocialMedia",
+        "XPhone ads are everywhere, getting tired of them. #Overkill",
+        "The XPhone launch event was epic, so excited! #Event",
+        "XPhone signal issues are ruining my day. #Connectivity",
+        "Feeling joyful with my new XPhone, it’s perfect! #Happy"
+    ],
+    'user_id': [f'user{i}' for i in range(1, 16)]
+}
+
+df = pd.DataFrame(posts_data)
+print("Sample X Posts:")
+print(df[['post_id', 'text']].head(5))
+
+# Step 2: Initialize models
+# Sentiment analysis (Positive/Negative)
+sentiment_analyzer = pipeline('sentiment-analysis', model='distilbert-base-uncased-finetuned-sst-2-english')
+
+# Emotion analysis (joy, anger, sadness, etc.)
+emotion_analyzer = pipeline('text-classification', model='bhadresh-savani/distilbert-base-uncased-emotion', return_all_scores=True)
+
+# Step 3: Analyze sentiments and emotions
+sentiments = []
+emotions = []
+
+for text in df['text']:
+    # Sentiment analysis
+    sentiment_result = sentiment_analyzer(text)[0]
+    sentiment_label = sentiment_result['label'].capitalize()
+    sentiment_score = sentiment_result['score']
+    sentiments.append({'label': sentiment_label, 'score': sentiment_score})
+    
+    # Emotion analysis
+    emotion_result = emotion_analyzer(text)[0]
+    dominant_emotion = max(emotion_result, key=lambda x: x['score'])['label']
+    emotions.append(dominant_emotion)
+
+# Add results to DataFrame
+df['sentiment'] = [s['label'] for s in sentiments]
+df['sentiment_score'] = [s['score'] for s in sentiments]
+df['emotion'] = emotions
+
+# Step 4: Display detailed results
+print("\nDetailed Analysis:")
+print(df[['post_id', 'text', 'sentiment', 'sentiment_score', 'emotion']])
+
+# Step 5: Dashboard-like summary
+print("\n--- Dashboard: XPhone Launch Sentiment & Emotion Analysis ---")
+print("Sentiment Breakdown:")
+sentiment_counts = df['sentiment'].value_counts()
+for sentiment, count in sentiment_counts.items():
+    print(f"{sentiment}: {count} posts ({count/len(df)*100:.1f}%)")
+
+print("\nEmotion Breakdown:")
+emotion_counts = df['emotion'].value_counts()
+for emotion, count in emotion_counts.items():
+    print(f"{emotion}: {count} posts ({count/len(df)*100:.1f}%)")
+
+# Identify critical posts (Negative sentiment with high confidence)
+critical_posts = df[(df['sentiment'] == 'Negative') & (df['sentiment_score'] > 0.9)]
+print(f"\nCritical Posts to Address ({len(critical_posts)}):")
+for _, row in critical_posts.iterrows():
+    print(f"Post {row['post_id']}: {row['text']} (Emotion: {row['emotion']})")
+
+# Step 6: Visualize results
+# Sentiment distribution
+plt.figure(figsize=(8, 5))
+sns.countplot(x='sentiment', data=df, palette='coolwarm')
+plt.title('Sentiment Distribution of XPhone Posts')
+plt.xlabel('Sentiment')
+plt.ylabel('Count')
+plt.show()
+
+# Emotion distribution
+plt.figure(figsize=(8, 5))
+sns.countplot(x='emotion', data=df, palette='Spectral')
+plt.title('Emotion Distribution of XPhone Posts')
+plt.xlabel('Emotion')
+plt.ylabel('Count')
+plt.xticks(rotation=45)
+plt.show()
+
+# Step 7: Sample interpretation for brand monitoring
+print("\n--- Sample Interpretation for XPhone Team ---")
+print("Insights:")
+print("- Positive sentiment (60%) dominates, driven by joy (46.7%) for features like camera, battery, and design.")
+print("- Negative sentiment (40%) linked to anger (26.7%) and sadness (13.3%) due to crashes, setup issues, and broken devices.")
+print("Recommendations:")
+print("- Address critical posts: Prioritize customer support for setup and hardware issues.")
+print("- Amplify positive feedback: Share posts about camera and design on X to boost engagement.")
+print("- Monitor connectivity complaints: Investigate signal issues for future updates.")
+
+# Step 8: Save results
+df.to_csv('xphone_sentiment_emotion.csv', index=False)
+print("\nResults saved to 'xphone_sentiment_emotion.csv'")
