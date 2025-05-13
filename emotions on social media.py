@@ -68,16 +68,23 @@ def load_dataset(file_path):
     try:
         data = []
         with open(file_path, 'r', encoding='utf-8') as file:
-            for line in file:
+            lines = file.readlines()
+            if not lines:
+                st.error(f"Dataset file {file_path} is empty.")
+                st.stop()
+            for line in lines:
                 if line.strip():
                     if ';' not in line:
                         st.warning(f"Skipping malformed line in {file_path}: {line.strip()}")
                         continue
                     text, emotion = line.strip().split(';')
+                    if not text or not emotion:
+                        st.warning(f"Skipping invalid line in {file_path}: {line.strip()}")
+                        continue
                     data.append([text, emotion])
         df = pd.DataFrame(data, columns=['text', 'emotion'])
         if df.empty:
-            st.error(f"Dataset file {file_path} is empty or contains no valid data.")
+            st.error(f"Dataset file {file_path} contains no valid data after parsing.")
             st.stop()
         return df
     except Exception as e:
@@ -98,31 +105,51 @@ def download_kaggle_dataset():
         st.error("Kaggle API credentials not found in Streamlit secrets.")
         st.write("Please configure secrets.toml (locally) or Streamlit Cloud secrets with:")
         st.code("[kaggle]\nusername = \"your_kaggle_username\"\nkey = \"your_kaggle_api_key\"")
-        st.error("Alternatively, manually download the dataset from: https://www.kaggle.com/datasets/praveengovi/emotions-dataset-for-nlp")
-        st.stop()
+        return False
     
     try:
-        kaggle.api.dataset_download_files(dataset, path=data_dir, unzip=True)
+        kaggle.api.dataset_download_files(dataset, path=data_dir, unzip=True, force=True)
         st.write("Dataset downloaded successfully.")
+        return True
     except kaggle.api.KaggleApiError as e:
         st.error(f"Kaggle API error: {str(e)}")
-        st.error("Possible causes: Invalid API credentials, dataset rules not accepted, or network issues.")
-        st.error("Please ensure you have accepted the dataset rules on Kaggle: https://www.kaggle.com/datasets/praveengovi/emotions-dataset-for-nlp")
-        st.error("Alternatively, manually download the dataset and place train.txt, test.txt, and val.txt in the ./data/ folder.")
-        st.stop()
+        st.error("Possible causes:")
+        st.write("- Invalid API credentials: Regenerate your Kaggle API token from https://www.kaggle.com/settings/account.")
+        st.write("- Dataset rules not accepted: Visit https://www.kaggle.com/datasets/praveengovi/emotions-dataset-for-nlp and accept the rules.")
+        st.write("- Network issues: Ensure you have a stable internet connection.")
+        return False
     except Exception as e:
         st.error(f"Unexpected error during dataset download: {str(e)}")
-        st.stop()
+        return False
 
-# Check if dataset files exist
+# Check if dataset files exist and handle download
 data_dir = './data/'
 train_file = os.path.join(data_dir, 'train.txt')
 test_file = os.path.join(data_dir, 'test.txt')
 val_file = os.path.join(data_dir, 'val.txt')
 
+# Add toggle to bypass Kaggle API
+use_kaggle_api = st.checkbox("Use Kaggle API to download dataset (uncheck to manually provide dataset)", value=True)
+
 if not all(os.path.exists(f) for f in [train_file, test_file, val_file]):
-    st.write("Dataset files not found. Attempting to download from Kaggle...")
-    download_kaggle_dataset()
+    if use_kaggle_api:
+        st.write("Dataset files not found. Attempting to download from Kaggle...")
+        success = download_kaggle_dataset()
+        if not success:
+            st.error("Kaggle API download failed. Please manually download the dataset.")
+            st.write("Steps to manually download:")
+            st.write("1. Visit: https://www.kaggle.com/datasets/praveengovi/emotions-dataset-for-nlp")
+            st.write("2. Download the dataset and extract it.")
+            st.write("3. Place train.txt, test.txt, and val.txt in the ./data/ folder.")
+            st.stop()
+    else:
+        st.error("Dataset files not found in ./data/.")
+        st.write("Since you unchecked the Kaggle API option, please manually place the dataset files.")
+        st.write("Steps to manually download:")
+        st.write("1. Visit: https://www.kaggle.com/datasets/praveengovi/emotions-dataset-for-nlp")
+        st.write("2. Download the dataset and extract it.")
+        st.write("3. Place train.txt, test.txt, and val.txt in the ./data/ folder.")
+        st.stop()
 else:
     st.write("Dataset files found in ./data/:")
     st.write(os.listdir(data_dir))
