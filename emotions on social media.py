@@ -1,162 +1,244 @@
-import streamlit as st
 import pandas as pd
-import numpy as np
-import plotly.express as px
-from transformers import pipeline
-import tweepy
-import warnings
-warnings.filterwarnings('ignore')
+import nltk
+import re
+import streamlit as st
+import matplotlib.pyplot as plt
+import seaborn as sns
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+import os
+from pathlib import Path
+import zipfile
+import kaggle
 
-# Set random seed for reproducibility
-np.random.seed(42)
+# Download NLTK resources
+nltk.download('punkt')
+nltk.download('stopwords')
+stop_words = set(stopwords.words('english'))
 
-# Streamlit app title
-st.title("XPhone Launch Sentiment & Emotion Analysis Dashboard")
+# Function to preprocess text
+def preprocess_text(text):
+    text = text.lower()
+    text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\@w+|\#', '', text)
+    text = re.sub(r'[^\w\s]', '', text)
+    tokens = word_tokenize(text)
+    tokens = [word for word in tokens if word not in stop_words]
+    return ' '.join(tokens)
 
-# Step 1: Access API key from Streamlit Secrets
-try:
-    api_key = st.secrets["API_KEY"]
-except KeyError:
-    st.error("API key not found in Streamlit Secrets. Please add 'API_KEY' in the app's secrets settings.")
-    api_key = None
+# Function to load dataset
+def load_dataset(file_path):
+    data = []
+    with open(file_path, 'r', encoding='utf-8') as file:
+        for line in file:
+            if line.strip():
+                text, emotion = line.strip().split(';')
+                data.append([text, emotion])
+    return pd.DataFrame(data, columns=['text', 'emotion'])
 
-# Step 2: Fetch X posts via API or use fallback synthetic dataset
-@st.cache_data
-def fetch_x_posts(bearer_token, query="#XPhoneLaunch", max_results=15):
-    if not bearer_token:
-        st.warning("Using synthetic dataset due to missing API key.")
-        return pd.DataFrame({
-            'post_id': range(1, 16),
-            'text': [
-                "The new XPhone is incredible! Best tech ever! 😍 #XPhoneLaunch",
-                "Why does the XPhone keep crashing? So annoyed 😡 #TechIssues",
-                "Just got my XPhone, loving the camera quality! #Photography",
-                "Terrible customer service for XPhone issues. #Disappointed",
-                "XPhone battery life is amazing, super impressed! #Innovation",
-                "Feeling sad, my XPhone arrived broken. 😢 #QualityControl",
-                "Wow, XPhone’s design is sleek and modern! #LoveIt",
-                "Can’t believe the XPhone price hike, not worth it. #Ripoff",
-                "XPhone’s new features are a game-changer! #TechLover",
-                "Struggling with XPhone setup, so frustrating! #UserExperience",
-                "Shared my XPhone pics on X, got so many likes! #SocialMedia",
-                "XPhone ads are everywhere, getting tired of them. #Overkill",
-                "The XPhone launch event was epic, so excited! #Event",
-                "XPhone signal issues are ruining my day. #Connectivity",
-                "Feeling joyful with my new XPhone, it’s perfect! #Happy"
-            ],
-            'user_id': [f'user{i}' for i in range(1, 16)]
-        })
-
-    try:
-        client = tweepy.Client(bearer_token=bearer_token)
-        tweets = client.search_recent_tweets(query=query, max_results=max_results, 
-                                            tweet_fields=['id', 'text', 'author_id'])
-        if not tweets.data:
-            st.warning("No posts found for query. Using synthetic dataset.")
-            return fetch_x_posts(None)  # Fallback to synthetic
-
-        posts_data = {
-            'post_id': [tweet.id for tweet in tweets.data],
-            'text': [tweet.text for tweet in tweets.data],
-            'user_id': [str(tweet.author_id) for tweet in tweets.data]
-        }
-        return pd.DataFrame(posts_data)
-    except Exception as e:
-        st.error(f"Error fetching X posts: {str(e)}")
-        return fetch_x_posts(None)  # Fallback to synthetic
-
-# Fetch posts
-df = fetch_x_posts(api_key)
-
-# Display sample posts
-st.subheader("Sample X Posts")
-st.dataframe(df[['post_id', 'text']].head(5))
-
-# Step 3: Initialize models
-@st.cache_resource
-def load_models():
-    sentiment_analyzer = pipeline('sentiment-analysis', model='distilbert-base-uncased-finetuned-sst-2-english')
-    emotion_analyzer = pipeline('text-classification', model='bhadresh-savani/distilbert-base-uncased-emotion', return_all_scores=True)
-    return sentiment_analyzer, emotion_analyzer
-
-sentiment_analyzer, emotion_analyzer = load_models()
-
-# Step 4: Analyze sentiments and emotions
-sentiments = []
-emotions = []
-
-for text in df['text']:
-    # Sentiment analysis
-    sentiment_result = sentiment_analyzer(text)[0]
-    sentiment_label = sentiment_result['label'].capitalize()
-    sentiment_score = sentiment_result['score']
-    sentiments.append({'label': sentiment_label, 'score': sentiment_score})
+# Function to download dataset using Kaggle API
+def download_kaggle_dataset():
+    dataset = 'praveengovi/emotions-dataset-for-nlp'
+    data_dir = './data/'
+    os.makedirs(data_dir, exist_ok=True)
     
-    # Emotion analysis
-    emotion_result = emotion_analyzer(text)[0]
-    dominant_emotion = max(emotion_result, key=lambda x: x['score'])['label']
-    emotions.append(dominant_emotion)
+    # Configure Kaggle API with secrets
+    try:
+        os.environ['KAGGLE_USERNAME'] = st.secrets['kaggle']['username']
+        os.environ['KAGGLE_KEY'] = st.secrets['kaggle']['key']
+    except KeyError:
+        st.error("Kaggle API credentials not found in Streamlit secrets. Please configure secrets.toml or Streamlit Cloud secrets.")
+        st.stop()
+    
+    # Download and unzip dataset
+    kaggle.api.dataset_download_files(dataset, path=data_dir, unzip=True)
 
-# Add results to DataFrame
-df['sentiment'] = [s['label'] for s in sentiments]
-df['sentiment_score'] = [s['score'] for s in sentiments]
-df['emotion'] = emotions
+# Check if dataset files exist
+data_dir = './data/'
+train_file = os.path.join(data_dir, 'train.txt')
+test_file = os.path.join(data_dir, 'test.txt')
+val_file = os.path.join(data_dir, 'val.txt')
 
-# Step 5: Display detailed results
-st.subheader("Detailed Analysis")
-st.dataframe(df[['post_id', 'text', 'sentiment', 'sentiment_score', 'emotion']])
+if not all(os.path.exists(f) for f in [train_file, test_file, val_file]):
+    st.write("Dataset files not found. Downloading from Kaggle...")
+    download_kaggle_dataset()
+    st.write("Download complete.")
 
-# Step 6: Dashboard-like summary
-st.subheader("Dashboard: XPhone Launch Sentiment & Emotion Analysis")
+# Load and combine datasets
+try:
+    train_df = load_dataset(train_file)
+    test_df = load_dataset(test_file)
+    val_df = load_dataset(val_file)
+    df = pd.concat([train_df, test_df, val_df], ignore_index=True)
+except FileNotFoundError:
+    st.error("Failed to load dataset files. Please ensure the dataset is downloaded correctly.")
+    st.stop()
 
-# Sentiment breakdown
-st.write("**Sentiment Breakdown**")
-sentiment_counts = df['sentiment'].value_counts()
-for sentiment, count in sentiment_counts.items():
-    st.write(f"{sentiment}: {count} posts ({count/len(df)*100:.1f}%)")
+# Preprocess text
+df['processed_text'] = df['text'].apply(preprocess_text)
 
-# Emotion breakdown
-st.write("**Emotion Breakdown**")
-emotion_counts = df['emotion'].value_counts()
-for emotion, count in emotion_counts.items():
-    st.write(f"{emotion}: {count} posts ({count/len(df)*100:.1f}%)")
+# Map emotions to sentiment polarity
+emotion_to_sentiment = {
+    'sadness': 'negative',
+    'anger': 'negative',
+    'fear': 'negative',
+    'joy': 'positive',
+    'love': 'positive',
+    'surprise': 'neutral'
+}
+df['sentiment'] = df['emotion'].map(emotion_to_sentiment)
 
-# Critical posts
-critical_posts = df[(df['sentiment'] == 'Negative') & (df['sentiment_score'] > 0.9)]
-st.write(f"**Critical Posts to Address ({len(critical_posts)})**")
-for _, row in critical_posts.iterrows():
-    st.write(f"Post {row['post_id']}: {row['text']} (Emotion: {row['emotion']})")
+# Train model
+X = df['processed_text']
+y_emotion = df['emotion']
+y_sentiment = df['sentiment']
 
-# Step 7: Visualize results
-# Sentiment distribution (Plotly)
-st.subheader("Visualizations")
-fig_sentiment = px.histogram(df, x='sentiment', title='Sentiment Distribution of XPhone Posts', 
-                             color='sentiment', color_discrete_sequence=px.colors.qualitative.Set2)
-fig_sentiment.update_layout(xaxis_title='Sentiment', yaxis_title='Count')
-st.plotly_chart(fig_sentiment)
+# TF-IDF Vectorization
+vectorizer = TfidfVectorizer(max_features=5000)
+X_tfidf = vectorizer.fit_transform(X)
 
-# Emotion distribution (Plotly)
-fig_emotion = px.histogram(df, x='emotion', title='Emotion Distribution of XPhone Posts', 
-                           color='emotion', color_discrete_sequence=px.colors.qualitative.Pastel)
-fig_emotion.update_layout(xaxis_title='Emotion', yaxis_title='Count')
-st.plotly_chart(fig_emotion)
+# Split data
+X_train, X_test, y_train_emotion, y_test_emotion = train_test_split(X_tfidf, y_emotion, test_size=0.2, random_state=42)
+_, _, y_train_sentiment, y_test_sentiment = train_test_split(X_tfidf, y_sentiment, test_size=0.2, random_state=42)
 
-# Step 8: Sample interpretation
-st.subheader("Sample Interpretation for XPhone Team")
-st.write("**Insights**")
-st.write("- Positive sentiment dominates, driven by joy for features like camera, battery, and design.")
-st.write("- Negative sentiment linked to anger and sadness due to crashes, setup issues, and broken devices.")
-st.write("**Recommendations**")
-st.write("- Address critical posts: Prioritize customer support for setup and hardware issues.")
-st.write("- Amplify positive feedback: Share posts about camera and design on X to boost engagement.")
-st.write("- Monitor connectivity complaints: Investigate signal issues for future updates.")
+# Train Logistic Regression models
+emotion_model = LogisticRegression(max_iter=1000)
+emotion_model.fit(X_train, y_train_emotion)
 
-# Step 9: Provide CSV download
-st.subheader("Download Results")
-csv = df.to_csv(index=False)
-st.download_button(
-    label="Download analysis as CSV",
-    data=csv,
-    file_name="xphone_sentiment_emotion.csv",
-    mime="text/csv"
-)
+sentiment_model = LogisticRegression(max_iter=1000)
+sentiment_model.fit(X_train, y_train_sentiment)
+
+# Streamlit App
+st.title("Decoding Emotions in Social Media Conversations")
+st.write("Enter a social media post to analyze its emotion and sentiment.")
+
+# User input
+user_input = st.text_area("Enter your text:", "I feel so happy today!")
+
+if st.button("Analyze"):
+    # Preprocess user input
+    processed_input = preprocess_text(user_input)
+    input_tfidf = vectorizer.transform([processed_input])
+    
+    # Predict emotion and sentiment
+    predicted_emotion = emotion_model.predict(input_tfidf)[0]
+    predicted_sentiment = sentiment_model.predict(input_tfidf)[0]
+    
+    # Display results
+    st.subheader("Analysis Results")
+    st.write(f"**Predicted Emotion**: {predicted_emotion}")
+    st.write(f"**Predicted Sentiment**: {predicted_sentiment}")
+    
+    # Display confidence scores
+    emotion_probs = emotion_model.predict_proba(input_tfidf)[0]
+    emotion_labels = emotion_model.classes_
+    st.subheader("Emotion Confidence Scores")
+    for label, prob in zip(emotion_labels, emotion_probs):
+        st.write(f"{label}: {prob:.2%}")
+
+# Visualization: Emotion distribution
+st.subheader("Dataset Emotion Distribution")
+fig, ax = plt.subplots()
+sns.countplot(data=df, x='emotion', ax=ax)
+plt.xticks(rotation=45)
+st.pyplot(fig)
+</x(aiArtifact>
+
+---
+
+### Step 4: Instructions to Run the Code
+1. **Install Dependencies**:
+   ```bash
+   pip install pandas nltk scikit-learn streamlit matplotlib seaborn kaggle
+   ```
+
+2. **Set Up Streamlit Secrets**:
+   - **Locally**:
+     - Create `.streamlit/secrets.toml` in your project directory.
+     - Add your Kaggle API credentials (see Step 2).
+   - **For Deployment** (e.g., Streamlit Cloud):
+     - Go to your app’s settings on Streamlit Cloud.
+     - Add the secrets in the "Secrets" section as shown above.
+
+3. **Save the Code**:
+   - Save the code as `emotion_sentiment_analysis_with_secrets.py`.
+
+4. **Run the Streamlit App**:
+   ```bash
+   streamlit run emotion_sentiment_analysis_with_secrets.py
+   ```
+   - The app will check for dataset files. If missing, it will download them using the Kaggle API credentials from Streamlit secrets.
+   - The web interface will be available at `http://localhost:8501`.
+
+5. **Deploy on Streamlit Cloud** (Optional):
+   - Push your code to a GitHub repository.
+   - Connect Streamlit Cloud to your repository.
+   - Add the Kaggle API credentials in the app’s secrets settings.
+   - Deploy the app.
+
+---
+
+### Step 5: Why Streamlit Secrets with Kaggle API is Convenient
+- **Security**: Storing the Kaggle API key in Streamlit secrets avoids hardcoding sensitive information in the code, reducing the risk of accidental exposure.
+- **Automation**: The dataset is downloaded automatically if missing, making the app portable and suitable for deployment.
+- **Deployment-Friendly**: Streamlit Cloud supports secrets management, so the same code works locally and in production without modification.
+- **Phase 3 Suitability**: This approach demonstrates proficiency in API integration, secure credential management, and web app development, aligning with a Phase 3 project’s expectations.
+
+---
+
+### Step 6: Potential Issues and Solutions
+1. **Missing Secrets**:
+   - **Error**: `KeyError: 'kaggle' not found in secrets`.
+   - **Solution**: Ensure `secrets.toml` exists locally or secrets are configured in Streamlit Cloud. Verify the `[kaggle]` section includes `username` and `key`.
+
+2. **Kaggle API Authentication Failure**:
+   - **Error**: `403 Forbidden` or authentication errors.
+   - **Solution**: Regenerate the Kaggle API token and update `secrets.toml`. Ensure your Kaggle account has accepted the dataset’s rules (visit the Kaggle dataset page and click "Download").
+
+3. **Dataset Download Issues**:
+   - **Error**: Files not found or corrupted.
+   - **Solution**: Check internet connectivity. Manually inspect the `./data/` folder to ensure `train.txt`, `test.txt`, and `val.txt` are present. If issues persist, download manually and place files in `./data/`.
+
+4. **Streamlit Cloud Deployment**:
+   - **Issue**: App fails to download dataset.
+   - **Solution**: Verify secrets are correctly set in Streamlit Cloud. Ensure the `kaggle` library is included in your `requirements.txt`:
+     ```txt
+     pandas
+     nltk
+     scikit-learn
+     streamlit
+     matplotlib
+     seaborn
+     kaggle
+     ```
+
+---
+
+### Step 7: Additional Notes
+- **Alternative Dataset**: If you prefer a tweet-specific dataset, you can use the **Sentiment140 dataset** (https://www.kaggle.com/datasets/kazanova/sentiment140). Modify the `load_dataset` function to handle CSV format:
+  ```python
+  def load_dataset(file_path):
+      return pd.read_csv(file_path, encoding='latin-1')
+  ```
+  Update the dataset identifier in `download_kaggle_dataset` to `kazanova/sentiment140`.
+
+- **Enhancements**:
+  - Add a word cloud visualization for frequent words per emotion.
+  - Allow users to upload a CSV file with social media posts for batch analysis.
+  - Integrate a pre-trained transformer model (e.g., `distilbert-base-uncased-finetuned-sst-2-english`) for improved accuracy.
+
+- **Testing the App**:
+  - Test with inputs like:
+    - "I’m so excited about my new job!" (Expected: joy, positive)
+    - "Feeling really down today." (Expected: sadness, negative)
+  - Verify the emotion distribution plot matches the dataset’s label distribution.
+
+- **Project Submission**:
+  - Include a `README.md` explaining how to set up secrets and run the app.
+  - Document the model’s performance (e.g., add a classification report in the code).
+  - Highlight the use of Streamlit secrets as a secure and modern approach.
+
+If you need help with specific modifications (e.g., adding features, switching datasets, or troubleshooting deployment), please provide details, and I’ll assist further!
