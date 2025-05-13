@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from transformers import pipeline
-import requests
 import tweepy
 import warnings
 warnings.filterwarnings('ignore')
@@ -14,23 +13,12 @@ np.random.seed(42)
 # Streamlit app title
 st.title("XPhone Launch Sentiment & Emotion Analysis Dashboard")
 
-# Step 1: Fetch API key from GitHub
-@st.cache_data
-def fetch_api_key(github_url):
-    try:
-        response = requests.get(github_url)
-        if response.status_code == 200:
-            return response.text.strip()
-        else:
-            st.error(f"Failed to fetch API key from GitHub: {response.status_code}")
-            return None
-    except Exception as e:
-        st.error(f"Error fetching API key: {str(e)}")
-        return None
-
-# Replace with your GitHub raw file URL
-github_api_key_url = "https://raw.githubusercontent.com/your_username/your_repo/main/api_key.txt"
-api_key = fetch_api_key(github_api_key_url)
+# Step 1: Access API key from Streamlit Secrets
+try:
+    api_key = st.secrets["API_KEY"]
+except KeyError:
+    st.error("API key not found in Streamlit Secrets. Please add 'API_KEY' in the app's secrets settings.")
+    api_key = None
 
 # Step 2: Fetch X posts via API or use fallback synthetic dataset
 @st.cache_data
