@@ -12,15 +12,17 @@ from sklearn.model_selection import train_test_split
 import os
 from pathlib import Path
 import kaggle
+import joblib
 
 # Pre-download NLTK resources with error handling
 try:
     nltk.download('punkt', quiet=True)
     nltk.download('stopwords', quiet=True)
+    stop_words = set(stopwords.words('english'))
+    st.write("NLTK resources loaded successfully.")
 except Exception as e:
-    st.error(f"Failed to download NLTK resources: {str(e)}. Please ensure you have an internet connection.")
+    st.error(f"Failed to download NLTK resources: {str(e)}. Please ensure you have an internet connection and run: nltk.download('punkt'), nltk.download('stopwords') locally.")
     st.stop()
-stop_words = set(stopwords.words('english'))
 
 # Function to preprocess text
 def preprocess_text(text):
@@ -31,21 +33,29 @@ def preprocess_text(text):
         text = re.sub(r'[^\w\s]', '', text)
         tokens = word_tokenize(text)
         tokens = [word for word in tokens if word not in stop_words and len(word) > 1]
-        return ' '.join(tokens) if tokens else text  # Fallback to original text if empty
+        return ' '.join(tokens) if tokens else text
     except Exception as e:
         st.error(f"Error preprocessing text: {str(e)}")
         return text
 
-# Function to load dataset
+# Function to load dataset with integrity check
 def load_dataset(file_path):
     try:
         data = []
         with open(file_path, 'r', encoding='utf-8') as file:
             for line in file:
                 if line.strip():
+                    # Check if the line has the expected format (text;emotion)
+                    if ';' not in line:
+                        st.warning(f"Skipping malformed line in {file_path}: {line.strip()}")
+                        continue
                     text, emotion = line.strip().split(';')
                     data.append([text, emotion])
-        return pd.DataFrame(data, columns=['text', 'emotion'])
+        df = pd.DataFrame(data, columns=['text', 'emotion'])
+        if df.empty:
+            st.error(f"Dataset file {file_path} is empty or contains no valid data.")
+            st.stop()
+        return df
     except Exception as e:
         st.error(f"Error loading dataset from {file_path}: {str(e)}")
         st.stop()
@@ -62,18 +72,24 @@ def download_kaggle_dataset():
         os.environ['KAGGLE_KEY'] = st.secrets['kaggle']['key']
         st.write("Kaggle API credentials loaded successfully.")
     except KeyError as e:
-        st.error("Kaggle API credentials not found in Streamlit secrets. Please configure secrets.toml with:")
+        st.error("Kaggle API credentials not found in Streamlit secrets.")
+        st.write("Please configure secrets.toml (locally) or Streamlit Cloud secrets with:")
         st.code("[kaggle]\nusername = \"your_kaggle_username\"\nkey = \"your_kaggle_api_key\"")
+        st.error("Alternatively, manually download the dataset from: https://www.kaggle.com/datasets/praveengovi/emotions-dataset-for-nlp")
         st.stop()
     
     # Download dataset
     try:
         kaggle.api.dataset_download_files(dataset, path=data_dir, unzip=True)
         st.write("Dataset downloaded successfully.")
+    except kaggle.api.KaggleApiError as e:
+        st.error(f"Kaggle API error: {str(e)}")
+        st.error("Possible causes: Invalid API credentials, dataset rules not accepted, or network issues.")
+        st.error("Please ensure you have accepted the dataset rules on Kaggle: https://www.kaggle.com/datasets/praveengovi/emotions-dataset-for-nlp")
+        st.error("Alternatively, manually download the dataset and place train.txt, test.txt, and val.txt in the ./data/ folder.")
+        st.stop()
     except Exception as e:
-        st.error(f"Failed to download dataset from Kaggle: {str(e)}")
-        st.error("Please manually download the dataset from https://www.kaggle.com/datasets/praveengovi/emotions-dataset-for-nlp")
-        st.error("Place train.txt, test.txt, and val.txt in the ./data/ folder.")
+        st.error(f"Unexpected error during dataset download: {str(e)}")
         st.stop()
 
 # Check if dataset files exist
@@ -86,7 +102,8 @@ if not all(os.path.exists(f) for f in [train_file, test_file, val_file]):
     st.write("Dataset files not found. Attempting to download from Kaggle...")
     download_kaggle_dataset()
 else:
-    st.write("Dataset files found in ./data/.")
+    st.write("Dataset files found in ./data/:")
+    st.write(os.listdir(data_dir))
 
 # Load and combine datasets
 try:
@@ -94,7 +111,8 @@ try:
     test_df = load_dataset(test_file)
     val_df = load_dataset(val_file)
     df = pd.concat([train_df, test_df, val_df], ignore_index=True)
-    st.write("Dataset loaded successfully. Sample data:", df.head())
+    st.write("Dataset loaded successfully. Total samples:", len(df))
+    st.write("Sample data:", df.head())
 except Exception as e:
     st.error(f"Failed to load dataset: {str(e)}")
     st.stop()
@@ -118,31 +136,50 @@ emotion_to_sentiment = {
 }
 df['sentiment'] = df['emotion'].map(emotion_to_sentiment)
 
-# Train model
+# Load or train model
+vectorizer_path = 'vectorizer.pkl'
+emotion_model_path = 'emotion_model.pkl'
+sentiment_model_path = 'sentiment_model.pkl'
+
 try:
-    X = df['processed_text']
-    y_emotion = df['emotion']
-    y_sentiment = df['sentiment']
+    # Check if models and vectorizer exist
+    if os.path.exists(vectorizer_path) and os.path.exists(emotion_model_path) and os.path.exists(sentiment_model_path):
+        vectorizer = joblib.load(vectorizer_path)
+        emotion_model = joblib.load(emotion_model_path)
+        sentiment_model = joblib.load(sentiment_model_path)
+        X_tfidf = vectorizer.transform(df['processed_text'])
+        st.write("Loaded pre-trained models and vectorizer.")
+    else:
+        # Train model
+        X = df['processed_text']
+        y_emotion = df['emotion']
+        y_sentiment = df['sentiment']
 
-    # TF-IDF Vectorization
-    vectorizer = TfidfVectorizer(max_features=5000)
-    X_tfidf = vectorizer.fit_transform(X)
-    st.write("TF-IDF vectorization complete. Shape of X_tfidf:", X_tfidf.shape)
+        # TF-IDF Vectorization
+        vectorizer = TfidfVectorizer(max_features=5000)
+        X_tfidf = vectorizer.fit_transform(X)
+        st.write("TF-IDF vectorization complete. Shape of X_tfidf:", X_tfidf.shape)
 
-    # Split data
-    X_train, X_test, y_train_emotion, y_test_emotion = train_test_split(X_tfidf, y_emotion, test_size=0.2, random_state=42)
-    _, _, y_train_sentiment, y_test_sentiment = train_test_split(X_tfidf, y_sentiment, test_size=0.2, random_state=42)
+        # Split data
+        X_train, X_test, y_train_emotion, y_test_emotion = train_test_split(X_tfidf, y_emotion, test_size=0.2, random_state=42)
+        _, _, y_train_sentiment, y_test_sentiment = train_test_split(X_tfidf, y_sentiment, test_size=0.2, random_state=42)
 
-    # Train Logistic Regression models
-    emotion_model = LogisticRegression(max_iter=1000)
-    emotion_model.fit(X_train, y_train_emotion)
-    st.write("Emotion model trained successfully.")
+        # Train Logistic Regression models
+        emotion_model = LogisticRegression(max_iter=1000)
+        emotion_model.fit(X_train, y_train_emotion)
+        st.write("Emotion model trained successfully.")
 
-    sentiment_model = LogisticRegression(max_iter=1000)
-    sentiment_model.fit(X_train, y_train_sentiment)
-    st.write("Sentiment model trained successfully.")
+        sentiment_model = LogisticRegression(max_iter=1000)
+        sentiment_model.fit(X_train, y_train_sentiment)
+        st.write("Sentiment model trained successfully.")
+
+        # Save models and vectorizer
+        joblib.dump(vectorizer, vectorizer_path)
+        joblib.dump(emotion_model, emotion_model_path)
+        joblib.dump(sentiment_model, sentiment_model_path)
+        st.write("Models and vectorizer saved for future use.")
 except Exception as e:
-    st.error(f"Error during model training: {str(e)}")
+    st.error(f"Error during model training or loading: {str(e)}")
     st.stop()
 
 # Streamlit App
@@ -197,6 +234,6 @@ try:
     sns.countplot(data=df, x='emotion', ax=ax)
     plt.xticks(rotation=45)
     st.pyplot(fig)
-    plt.clf()  # Clear the figure to prevent rendering issues
+    plt.clf()
 except Exception as e:
     st.error(f"Error rendering visualization: {str(e)}")
