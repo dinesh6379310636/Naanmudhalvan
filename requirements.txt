@@ -3,4 +3,6 @@ pandas
 numpy
 plotly
 transformers
-tourch
+torch
+requests
+tweepy
