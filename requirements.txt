@@ -5,3 +5,6 @@ streamlit
 matplotlib
 seaborn
 kaggle
+numpy
+scipy
+joblib
