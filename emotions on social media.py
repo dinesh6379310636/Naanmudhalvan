@@ -4,17 +4,24 @@ import requests
 from io import StringIO
 from textblob import TextBlob
 
-# Function to fetch dataset from GitHub with error handling
+# Function to fetch dataset from GitHub
 def load_data():
     url = "https://raw.githubusercontent.com/naanmudhalvan/data/main/emotions_data.txt"
+    
+    # Check if GitHub token is available in Streamlit secrets (for private repos)
+    headers = {}
+    if "github_token" in st.secrets:
+        headers = {"Authorization": f"token {st.secrets['github_token']}"}
+    
     try:
-        response = requests.get(url)
+        response = requests.get(url, headers=headers)
         response.raise_for_status()  # Raise an error for bad status codes
         data = StringIO(response.text)
         df = pd.read_csv(data, sep=';', names=['text', 'emotion'])
         return df
     except requests.exceptions.HTTPError as e:
         st.error(f"Failed to load dataset: {e}")
+        st.info("If your repository is private, please add a GitHub Personal Access Token (PAT) to Streamlit secrets as 'github_token'.")
         return pd.DataFrame(columns=['text', 'emotion'])
     except Exception as e:
         st.error(f"An error occurred: {e}")
@@ -48,7 +55,7 @@ st.subheader("Dataset Preview")
 if not df.empty:
     st.write(df.head())
 else:
-    st.write("No data loaded. Please check the dataset URL or file accessibility.")
+    st.write("No data loaded. Please check the dataset URL or repository access.")
 
 # Input for custom text analysis
 st.subheader("Analyze Your Own Text")
