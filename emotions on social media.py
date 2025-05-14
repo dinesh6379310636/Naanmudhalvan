@@ -10,7 +10,8 @@ required_libraries = {
     'seaborn': 'seaborn',
     'numpy': 'numpy',
     'scipy': 'scipy',
-    'joblib': 'joblib'
+    'joblib': 'joblib',
+    'requests': 'requests'
 }
 
 for lib_name, pkg_name in required_libraries.items():
@@ -19,7 +20,7 @@ for lib_name, pkg_name in required_libraries.items():
     except ImportError:
         st.error(f"Required library '{pkg_name}' is not installed.")
         st.write("Please install all required dependencies by running:")
-        st.code("pip install pandas nltk scikit-learn streamlit matplotlib seaborn numpy scipy joblib")
+        st.code("pip install pandas nltk scikit-learn streamlit matplotlib seaborn numpy scipy joblib requests")
         st.stop()
 
 # Import libraries after dependency check
@@ -33,8 +34,8 @@ from nltk.tokenize import word_tokenize
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
-import os
 import joblib
+import requests
 
 # Pre-download NLTK resources with error handling
 try:
@@ -60,40 +61,41 @@ def preprocess_text(text):
         st.error(f"Error preprocessing text: {str(e)}")
         return text
 
+# Function to fetch dataset from GitHub
+def fetch_dataset_from_github(github_url):
+    try:
+        response = requests.get(github_url)
+        response.raise_for_status()  # Raise an exception for bad status codes
+        st.write("Successfully fetched dataset from GitHub.")
+        return response.content
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to fetch dataset from GitHub: {str(e)}")
+        st.write("Possible causes:")
+        st.write("- Incorrect GitHub URL: Ensure the URL is correct and the repository is public.")
+        st.write("- Network issues: Check your internet connection.")
+        st.write("- File not found: Verify the file exists at the specified path in your repository.")
+        return None
+
 # Function to load dataset with configurable delimiter and encoding
-def load_dataset(file_path=None, file_content=None, delimiter=';'):
+def load_dataset(file_content=None, delimiter=';'):
     try:
         data = []
         encodings = ['utf-8', 'latin-1', 'utf-16']
         lines = None
 
-        if file_path:
-            # Try different encodings for local file
-            for encoding in encodings:
-                try:
-                    with open(file_path, 'r', encoding=encoding) as file:
-                        lines = file.readlines()
-                    st.write(f"Successfully read file with {encoding} encoding.")
-                    break
-                except UnicodeDecodeError:
-                    continue
-            if lines is None:
-                st.error(f"Failed to read file {file_path} with tried encodings: {', '.join(encodings)}.")
-                st.stop()
-        elif file_content:
-            # Try different encodings for uploaded file
+        if file_content:
             for encoding in encodings:
                 try:
                     lines = file_content.decode(encoding).splitlines()
-                    st.write(f"Successfully decoded uploaded file with {encoding} encoding.")
+                    st.write(f"Successfully decoded dataset with {encoding} encoding.")
                     break
                 except UnicodeDecodeError:
                     continue
             if lines is None:
-                st.error(f"Failed to decode uploaded file with tried encodings: {', '.join(encodings)}.")
+                st.error(f"Failed to decode dataset with tried encodings: {', '.join(encodings)}.")
                 st.stop()
         else:
-            st.error("No dataset provided. Please specify a file path or upload a dataset.")
+            st.error("No dataset content provided.")
             st.stop()
 
         if not lines:
@@ -137,15 +139,11 @@ default_dataset = [
     "This is surprising;surprise"
 ]
 
-# Dataset loading logic
-data_dir = './data/'
-dataset_file = os.path.join(data_dir, 'emotions_data.txt')
+# GitHub dataset URL input
+github_url = st.text_input("Enter the raw GitHub URL for your dataset (e.g., https://raw.githubusercontent.com/yourusername/your-repo/main/data/emotions_data.txt)", value="")
 
 # Allow user to specify delimiter
 delimiter = st.text_input("Delimiter for dataset (default is ';')", value=';')
-
-# Add file upload option for deployment
-uploaded_file = st.file_uploader("Upload your dataset (emotions_data.txt)", type=['txt'])
 
 # Add option to use default dataset for testing
 use_default_dataset = st.checkbox("Use default small dataset for testing (5 samples)", value=False)
@@ -153,19 +151,20 @@ use_default_dataset = st.checkbox("Use default small dataset for testing (5 samp
 if use_default_dataset:
     df = load_dataset(file_content='\n'.join(default_dataset).encode('utf-8'), delimiter=delimiter)
     st.write("Using default dataset with 5 samples.")
-elif uploaded_file:
-    df = load_dataset(file_content=uploaded_file.read(), delimiter=delimiter)
-    st.write("Dataset loaded from uploaded file.")
-elif os.path.exists(dataset_file):
-    df = load_dataset(file_path=dataset_file, delimiter=delimiter)
-    st.write("Dataset loaded from local file: data/emotions_data.txt")
+elif github_url:
+    dataset_content = fetch_dataset_from_github(github_url)
+    if dataset_content:
+        df = load_dataset(file_content=dataset_content, delimiter=delimiter)
+        st.write("Dataset loaded from GitHub.")
+    else:
+        st.stop()
 else:
-    st.error("Dataset file not found at data/emotions_data.txt, and no file was uploaded.")
-    st.write("Please ensure one of the following:")
-    st.write("- Place emotions_data.txt in the ./data/ folder.")
-    st.write("- Upload the dataset using the file uploader above.")
-    st.write("- Check 'Use default small dataset' to test with a small sample dataset.")
-    st.write("Expected format: Each line should be 'text<delimiter>emotion' (e.g., 'I feel so happy today;joy').")
+    st.error("Please provide a GitHub URL for the dataset or check 'Use default small dataset' to test with a small sample dataset.")
+    st.write("To get the raw GitHub URL:")
+    st.write("1. Go to your GitHub repository (e.g., https://github.com/yourusername/your-repo).")
+    st.write("2. Navigate to the file (e.g., data/emotions_data.txt).")
+    st.write("3. Click the 'Raw' button.")
+    st.write("4. Copy the URL (e.g., https://raw.githubusercontent.com/yourusername/your-repo/main/data/emotions_data.txt).")
     st.stop()
 
 # Display dataset info
