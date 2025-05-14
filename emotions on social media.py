@@ -98,19 +98,15 @@ with st.spinner("Downloading dataset..."):
     # Download the dataset using Kaggle API
     os.system("kaggle datasets download -d dair-ai/emotion --unzip -p ./data")
 
-# Load the dataset (adjust file name based on the actual dataset structure)
-# The dair-ai/emotion dataset typically has a file named 'emotion.csv' or similar
-# You may need to check the downloaded files in ./data to confirm the exact file name
-data_path = "./data/emotion.csv"  # Adjust this based on the actual file name
-df = pd.read_csv(data_path)
+# Load the dataset (use train.txt, which is tab-separated)
+data_path = "./data/train.txt"
+df = pd.read_csv(data_path, sep='\t', names=['text', 'label'])  # Specify tab separator and column names
 
-# Preprocess dataset (adjust column names based on the actual dataset)
-# For dair-ai/emotion, the columns are typically 'text' and 'label' (emotion)
-# Map 'label' (which might be numeric) to emotion names if necessary
+# Preprocess dataset
 df.dropna(subset=['text', 'label'], inplace=True)
 df.reset_index(drop=True, inplace=True)
 
-# If 'label' is numeric, map to emotion names (based on dair-ai/emotion dataset)
+# Map numeric labels to emotion names (based on dair-ai/emotion dataset)
 emotion_mapping = {
     0: 'sadness',
     1: 'joy',
