@@ -9,7 +9,6 @@ from xgboost import XGBClassifier
 from textblob import TextBlob
 import joblib
 from sklearn.preprocessing import LabelEncoder
-import urllib.request
 
 # Custom CSS for styling (identical to sample)
 st.markdown("""
@@ -81,7 +80,7 @@ with st.sidebar:
     st.markdown('<div class="section-header">Post Details</div>', unsafe_allow_html=True)
     user_post = st.text_area("Enter a social media post", height=150, placeholder="Type your post here...")
 
-# Set up Kaggle API credentials (for format consistency, though not used for GitHub dataset)
+# Set up Kaggle API credentials
 kaggle_api_token = {
     "username": st.secrets["kaggle"]["username"],
     "key": st.secrets["kaggle"]["key"]
@@ -92,20 +91,37 @@ with open(os.path.expanduser("~/.kaggle/kaggle.json"), "w") as f:
     json.dump(kaggle_api_token, f)
 os.chmod(os.path.expanduser("~/.kaggle/kaggle.json"), 0o600)
 
-# Load dataset from GitHub
+# Load dataset from Kaggle
 st.write("### Model Training and Evaluation")
 
-# Replace with your actual GitHub raw dataset URL
-dataset_url = "https://raw.githubusercontent.com/Naanmudhalvan/your-repo-name/main/emotion_dataset.csv"
-
 with st.spinner("Downloading dataset..."):
-    df = pd.read_csv(dataset_url)
+    # Download the dataset using Kaggle API
+    os.system("kaggle datasets download -d dair-ai/emotion --unzip -p ./data")
 
-# Preprocess dataset (assume columns: 'text' for posts, 'emotion' for labels)
-df.dropna(subset=['text', 'emotion'], inplace=True)
+# Load the dataset (adjust file name based on the actual dataset structure)
+# The dair-ai/emotion dataset typically has a file named 'emotion.csv' or similar
+# You may need to check the downloaded files in ./data to confirm the exact file name
+data_path = "./data/emotion.csv"  # Adjust this based on the actual file name
+df = pd.read_csv(data_path)
+
+# Preprocess dataset (adjust column names based on the actual dataset)
+# For dair-ai/emotion, the columns are typically 'text' and 'label' (emotion)
+# Map 'label' (which might be numeric) to emotion names if necessary
+df.dropna(subset=['text', 'label'], inplace=True)
 df.reset_index(drop=True, inplace=True)
 
-# Encode emotion labels
+# If 'label' is numeric, map to emotion names (based on dair-ai/emotion dataset)
+emotion_mapping = {
+    0: 'sadness',
+    1: 'joy',
+    2: 'love',
+    3: 'anger',
+    4: 'fear',
+    5: 'surprise'
+}
+df['emotion'] = df['label'].map(emotion_mapping)
+
+# Encode emotion labels for training
 label_encoder = LabelEncoder()
 df['emotion_encoded'] = label_encoder.fit_transform(df['emotion'])
 
