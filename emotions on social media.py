@@ -23,6 +23,7 @@ for lib_name, pkg_name in required_libraries.items():
 import pandas as pd
 import nltk
 import re
+import time
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
@@ -43,7 +44,7 @@ except Exception as e:
     nltk_available = False
     stop_words = {'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'this', 'that', 'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'a', 'an', 'the', 'and', 'but', 'if', 'or', 'because', 'as', 'until', 'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now'}
 
-# Function to preprocess text with NLTK fallback
+# Function to preprocess text with simplified logic
 def preprocess_text(text):
     try:
         text = text.lower()
@@ -54,25 +55,37 @@ def preprocess_text(text):
             tokens = word_tokenize(text)
         else:
             tokens = text.split()
-        tokens = [word for word in tokens if word not in stop_words and len(word) > 1]
-        return ' '.join(tokens) if tokens else text
+        # Less aggressive filtering
+        tokens = [word for word in tokens if word not in stop_words]
+        processed = ' '.join(tokens) if tokens else text
+        st.write(f"Debug - Processed text: '{processed}'")
+        return processed
     except Exception as e:
         st.error(f"Error preprocessing text: {str(e)}")
         return text
 
-# Function to fetch dataset from GitHub
-def fetch_dataset_from_github(github_url):
-    try:
-        response = requests.get(github_url, timeout=10)
-        response.raise_for_status()
-        st.write("Successfully fetched dataset from GitHub.")
-        return response.content
-    except requests.exceptions.RequestException as e:
-        st.warning(f"Failed to fetch dataset from GitHub: {str(e)}")
-        st.write("Please ensure the URL is correct and the repository is public.")
-        return None
+# Function to fetch dataset from GitHub with retries
+def fetch_dataset_from_github(github_url, retries=3, delay=2):
+    for attempt in range(retries):
+        try:
+            response = requests.get(github_url, timeout=10)
+            response.raise_for_status()
+            st.write(f"Successfully fetched dataset from GitHub on attempt {attempt + 1}.")
+            return response.content
+        except requests.exceptions.RequestException as e:
+            st.warning(f"Attempt {attempt + 1} failed to fetch dataset: {str(e)}")
+            if attempt < retries - 1:
+                st.write(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+            else:
+                st.warning("Failed to fetch dataset from GitHub after all retries.")
+                st.write("Possible causes:")
+                st.write("- Incorrect URL: Ensure it starts with https://raw.githubusercontent.com and points to the correct file.")
+                st.write("- Repository is private: You'll need a personal access token.")
+                st.write("- Network issues: Check your internet connection.")
+                return None
 
-# Function to load dataset
+# Function to load dataset with flexible delimiter handling
 def load_dataset(file_content=None, delimiter=';'):
     try:
         if not file_content:
@@ -90,21 +103,24 @@ def load_dataset(file_content=None, delimiter=';'):
         invalid_lines = 0
         for line in lines:
             if line.strip():
-                if delimiter not in line:
-                    st.warning(f"Skipping line due to missing delimiter '{delimiter}': {line.strip()}")
-                    invalid_lines += 1
-                    continue
-                parts = line.strip().split(delimiter)
-                if len(parts) != 2:
-                    st.warning(f"Skipping invalid line (expected 2 parts, got {len(parts)}): {line.strip()}")
+                # Try multiple delimiters if the specified one doesn't work
+                possible_delimiters = [delimiter, ';', ',', '\t']
+                parts = None
+                for d in possible_delimiters:
+                    if d in line:
+                        parts = line.strip().split(d)
+                        if len(parts) == 2:
+                            break
+                if not parts or len(parts) != 2:
+                    st.warning(f"Skipping invalid line (expected 2 parts): {line.strip()}")
                     invalid_lines += 1
                     continue
                 text, emotion = parts
-                if not text or not emotion:
+                if not text.strip() or not emotion.strip():
                     st.warning(f"Skipping line with empty text or emotion: {line.strip()}")
                     invalid_lines += 1
                     continue
-                data.append([text, emotion])
+                data.append([text.strip(), emotion.strip()])
 
         if invalid_lines > 0:
             st.write(f"Skipped {invalid_lines} invalid lines.")
@@ -157,7 +173,7 @@ df['processed_text'] = df['text'].apply(preprocess_text)
 # Check for empty processed text
 df = df[df['processed_text'].str.strip() != '']
 if df.empty:
-    st.error("No valid data after preprocessing. All processed texts are empty.")
+    st.error("No valid data after preprocessing. All processed texts are empty. Please check the dataset content.")
     st.stop()
 
 st.write("Text preprocessing complete. Sample processed text:", df['processed_text'].iloc[0])
@@ -185,6 +201,10 @@ try:
         st.write("TF-IDF vectorization complete. Shape of X_tfidf:", X_tfidf.shape)
 
         X_train, X_test, y_train_emotion, y_test_emotion = train_test_split(X_tfidf, y_emotion, test_size=0.2, random_state=42)
+
+        if X_train.shape[0] < 1 or X_test.shape[0] < 1:
+            st.error("Not enough data for train-test split. Please provide more valid samples.")
+            st.stop()
 
         emotion_model = LogisticRegression(max_iter=1000)
         emotion_model.fit(X_train, y_train_emotion)
