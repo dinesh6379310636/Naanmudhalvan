@@ -1,6 +1,6 @@
 import streamlit as st
 
-# Dependency check
+# Dependency check (removed kaggle)
 required_libraries = {
     'pandas': 'pandas',
     'nltk': 'nltk',
@@ -8,7 +8,6 @@ required_libraries = {
     'streamlit': 'streamlit',
     'matplotlib': 'matplotlib',
     'seaborn': 'seaborn',
-    'kaggle': 'kaggle',
     'numpy': 'numpy',
     'scipy': 'scipy',
     'joblib': 'joblib'
@@ -20,7 +19,7 @@ for lib_name, pkg_name in required_libraries.items():
     except ImportError:
         st.error(f"Required library '{pkg_name}' is not installed.")
         st.write("Please install all required dependencies by running:")
-        st.code("pip install pandas nltk scikit-learn streamlit matplotlib seaborn kaggle numpy scipy joblib")
+        st.code("pip install pandas nltk scikit-learn streamlit matplotlib seaborn numpy scipy joblib")
         st.stop()
 
 # Import libraries after dependency check
@@ -35,8 +34,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 import os
-from pathlib import Path
-import kaggle
 import joblib
 
 # Pre-download NLTK resources with error handling
@@ -63,108 +60,67 @@ def preprocess_text(text):
         st.error(f"Error preprocessing text: {str(e)}")
         return text
 
-# Function to load dataset with integrity check
-def load_dataset(file_path):
+# Function to load dataset from a text file
+def load_dataset(file_path=None, file_content=None):
     try:
         data = []
-        with open(file_path, 'r', encoding='utf-8') as file:
-            lines = file.readlines()
-            if not lines:
-                st.error(f"Dataset file {file_path} is empty.")
-                st.stop()
-            for line in lines:
-                if line.strip():
-                    if ';' not in line:
-                        st.warning(f"Skipping malformed line in {file_path}: {line.strip()}")
-                        continue
-                    text, emotion = line.strip().split(';')
-                    if not text or not emotion:
-                        st.warning(f"Skipping invalid line in {file_path}: {line.strip()}")
-                        continue
-                    data.append([text, emotion])
+        if file_path:  # Local file
+            with open(file_path, 'r', encoding='utf-8') as file:
+                lines = file.readlines()
+        elif file_content:  # Uploaded file
+            lines = file_content.decode('utf-8').splitlines()
+        else:
+            st.error("No dataset provided. Please specify a file path or upload a dataset.")
+            st.stop()
+
+        if not lines:
+            st.error("Dataset is empty.")
+            st.stop()
+
+        for line in lines:
+            if line.strip():
+                if ';' not in line:
+                    st.warning(f"Skipping malformed line: {line.strip()}")
+                    continue
+                text, emotion = line.strip().split(';')
+                if not text or not emotion:
+                    st.warning(f"Skipping invalid line: {line.strip()}")
+                    continue
+                data.append([text, emotion])
+        
         df = pd.DataFrame(data, columns=['text', 'emotion'])
         if df.empty:
-            st.error(f"Dataset file {file_path} contains no valid data after parsing.")
+            st.error("Dataset contains no valid data after parsing.")
             st.stop()
         return df
     except Exception as e:
-        st.error(f"Error loading dataset from {file_path}: {str(e)}")
+        st.error(f"Error loading dataset: {str(e)}")
         st.stop()
 
-# Function to download dataset using Kaggle API
-def download_kaggle_dataset():
-    dataset = 'praveengovi/emotions-dataset-for-nlp'
-    data_dir = './data/'
-    os.makedirs(data_dir, exist_ok=True)
-    
-    try:
-        os.environ['KAGGLE_USERNAME'] = st.secrets['kaggle']['username']
-        os.environ['KAGGLE_KEY'] = st.secrets['kaggle']['key']
-        st.write("Kaggle API credentials loaded successfully.")
-    except KeyError as e:
-        st.error("Kaggle API credentials not found in Streamlit secrets.")
-        st.write("Please configure secrets.toml (locally) or Streamlit Cloud secrets with:")
-        st.code("[kaggle]\nusername = \"your_kaggle_username\"\nkey = \"your_kaggle_api_key\"")
-        return False
-    
-    try:
-        kaggle.api.dataset_download_files(dataset, path=data_dir, unzip=True, force=True)
-        st.write("Dataset downloaded successfully.")
-        return True
-    except kaggle.api.KaggleApiError as e:
-        st.error(f"Kaggle API error: {str(e)}")
-        st.error("Possible causes:")
-        st.write("- Invalid API credentials: Regenerate your Kaggle API token from https://www.kaggle.com/settings/account.")
-        st.write("- Dataset rules not accepted: Visit https://www.kaggle.com/datasets/praveengovi/emotions-dataset-for-nlp and accept the rules.")
-        st.write("- Network issues: Ensure you have a stable internet connection.")
-        return False
-    except Exception as e:
-        st.error(f"Unexpected error during dataset download: {str(e)}")
-        return False
-
-# Check if dataset files exist and handle download
+# Dataset loading logic
 data_dir = './data/'
-train_file = os.path.join(data_dir, 'train.txt')
-test_file = os.path.join(data_dir, 'test.txt')
-val_file = os.path.join(data_dir, 'val.txt')
+dataset_file = os.path.join(data_dir, 'emotions_data.txt')
 
-# Add toggle to bypass Kaggle API
-use_kaggle_api = st.checkbox("Use Kaggle API to download dataset (uncheck to manually provide dataset)", value=True)
+# Add file upload option for deployment
+uploaded_file = st.file_uploader("Upload your dataset (emotions_data.txt)", type=['txt'])
 
-if not all(os.path.exists(f) for f in [train_file, test_file, val_file]):
-    if use_kaggle_api:
-        st.write("Dataset files not found. Attempting to download from Kaggle...")
-        success = download_kaggle_dataset()
-        if not success:
-            st.error("Kaggle API download failed. Please manually download the dataset.")
-            st.write("Steps to manually download:")
-            st.write("1. Visit: https://www.kaggle.com/datasets/praveengovi/emotions-dataset-for-nlp")
-            st.write("2. Download the dataset and extract it.")
-            st.write("3. Place train.txt, test.txt, and val.txt in the ./data/ folder.")
-            st.stop()
-    else:
-        st.error("Dataset files not found in ./data/.")
-        st.write("Since you unchecked the Kaggle API option, please manually place the dataset files.")
-        st.write("Steps to manually download:")
-        st.write("1. Visit: https://www.kaggle.com/datasets/praveengovi/emotions-dataset-for-nlp")
-        st.write("2. Download the dataset and extract it.")
-        st.write("3. Place train.txt, test.txt, and val.txt in the ./data/ folder.")
-        st.stop()
+if uploaded_file:
+    # Use uploaded file (e.g., for Streamlit Cloud)
+    df = load_dataset(file_content=uploaded_file.read())
+    st.write("Dataset loaded from uploaded file.")
+elif os.path.exists(dataset_file):
+    # Use local file
+    df = load_dataset(file_path=dataset_file)
+    st.write("Dataset loaded from local file: data/emotions_data.txt")
 else:
-    st.write("Dataset files found in ./data/:")
-    st.write(os.listdir(data_dir))
-
-# Load and combine datasets
-try:
-    train_df = load_dataset(train_file)
-    test_df = load_dataset(test_file)
-    val_df = load_dataset(val_file)
-    df = pd.concat([train_df, test_df, val_df], ignore_index=True)
-    st.write("Dataset loaded successfully. Total samples:", len(df))
-    st.write("Sample data:", df.head())
-except Exception as e:
-    st.error(f"Failed to load dataset: {str(e)}")
+    st.error("Dataset file not found at data/emotions_data.txt, and no file was uploaded.")
+    st.write("Please place emotions_data.txt in the ./data/ folder, or upload it using the file uploader above.")
+    st.write("Expected format: Each line should be 'text;emotion' (e.g., 'I feel so happy today;joy').")
     st.stop()
+
+# Display dataset info
+st.write("Dataset loaded successfully. Total samples:", len(df))
+st.write("Sample data:", df.head())
 
 # Preprocess text
 try:
