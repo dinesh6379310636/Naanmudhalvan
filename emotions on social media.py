@@ -4,17 +4,15 @@ import requests
 from io import StringIO
 from textblob import TextBlob
 
-# Function to fetch dataset from GitHub
-def load_data():
-    url = "https://raw.githubusercontent.com/naanmudhalvan/data/main/emotions_data.txt"
-    
+# Function to fetch dataset from the provided URL
+def load_data(dataset_url):
     # Check if GitHub token is available in Streamlit secrets (for private repos)
     headers = {}
     if "github_token" in st.secrets:
         headers = {"Authorization": f"token {st.secrets['github_token']}"}
     
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(dataset_url, headers=headers)
         response.raise_for_status()  # Raise an error for bad status codes
         data = StringIO(response.text)
         df = pd.read_csv(data, sep=';', names=['text', 'emotion'])
@@ -27,28 +25,20 @@ def load_data():
         st.error(f"An error occurred: {e}")
         return pd.DataFrame(columns=['text', 'emotion'])
 
-# Function to analyze sentiment and map to emotions
-def analyze_emotion(text):
-    blob = TextBlob(text)
-    polarity = blob.sentiment.polarity
-    
-    # Mapping polarity to emotions
-    if polarity < -0.5:
-        return "sadness"
-    elif polarity < 0:
-        return "anger"
-    elif polarity == 0:
-        return "fear"
-    elif polarity <= 0.5:
-        return "love"
-    else:
-        return "joy"
-
 # Streamlit app
 st.title("Emotion Detection and Analysis from Social Media Conversations")
 
-# Load dataset
-df = load_data()
+# Input for the dataset URL
+st.subheader("Enter Dataset URL")
+default_url = "https://raw.githubusercontent.com/naanmudhalvan/data/main/emotions_data.txt"
+dataset_url = st.text_input("Provide the raw GitHub URL for your dataset (emotions_data.txt):", value=default_url)
+
+# Load dataset using the provided URL
+if dataset_url:
+    df = load_data(dataset_url)
+else:
+    df = pd.DataFrame(columns=['text', 'emotion'])
+    st.warning("Please provide a valid dataset URL to proceed.")
 
 # Display dataset preview
 st.subheader("Dataset Preview")
@@ -86,3 +76,20 @@ if not df.empty:
             st.write(f"{i}. {text}")
 else:
     st.write("Cannot analyze emotions due to dataset loading failure.")
+
+# Function to analyze sentiment and map to emotions
+def analyze_emotion(text):
+    blob = TextBlob(text)
+    polarity = blob.sentiment.polarity
+    
+    # Mapping polarity to emotions
+    if polarity < -0.5:
+        return "sadness"
+    elif polarity < 0:
+        return "anger"
+    elif polarity == 0:
+        return "fear"
+    elif polarity <= 0.5:
+        return "love"
+    else:
+        return "joy"
