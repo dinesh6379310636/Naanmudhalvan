@@ -96,7 +96,7 @@ os.chmod(os.path.expanduser("~/.kaggle/kaggle.json"), 0o600)
 st.write("### Model Training and Evaluation")
 
 # Replace with your actual GitHub raw dataset URL
-dataset_url = "https://raw.githubusercontent.com/your-username/your-repo/main/emotion_dataset.csv"
+dataset_url = "https://raw.githubusercontent.com/Naanmudhalvan/your-repo-name/main/emotion_dataset.csv"
 
 with st.spinner("Downloading dataset..."):
     df = pd.read_csv(dataset_url)
