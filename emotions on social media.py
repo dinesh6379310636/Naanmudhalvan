@@ -19,36 +19,41 @@ for lib_name, pkg_name in required_libraries.items():
         st.code("pip install pandas nltk scikit-learn streamlit requests joblib")
         st.stop()
 
-# Import libraries after dependency check
+# Import libraries
 import pandas as pd
 import nltk
 import re
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 import requests
 import joblib
 
-# Pre-download NLTK resources
+# Attempt to import NLTK resources with fallback
 try:
     nltk.download('punkt', quiet=True)
     nltk.download('stopwords', quiet=True)
+    from nltk.corpus import stopwords
+    from nltk.tokenize import word_tokenize
     stop_words = set(stopwords.words('english'))
     st.write("NLTK resources loaded successfully.")
+    nltk_available = True
 except Exception as e:
-    st.error(f"Failed to download NLTK resources: {str(e)}. Please ensure you have an internet connection.")
-    st.stop()
+    st.warning(f"Failed to load NLTK resources: {str(e)}. Falling back to basic preprocessing.")
+    nltk_available = False
+    stop_words = {'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'this', 'that', 'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'a', 'an', 'the', 'and', 'but', 'if', 'or', 'because', 'as', 'until', 'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now'}
 
-# Function to preprocess text
+# Function to preprocess text with NLTK fallback
 def preprocess_text(text):
     try:
         text = text.lower()
         text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)
         text = re.sub(r'\@w+|\#', '', text)
         text = re.sub(r'[^\w\s]', '', text)
-        tokens = word_tokenize(text)
+        if nltk_available:
+            tokens = word_tokenize(text)
+        else:
+            tokens = text.split()
         tokens = [word for word in tokens if word not in stop_words and len(word) > 1]
         return ' '.join(tokens) if tokens else text
     except Exception as e:
@@ -63,19 +68,21 @@ def fetch_dataset_from_github(github_url):
         st.write("Successfully fetched dataset from GitHub.")
         return response.content
     except requests.exceptions.RequestException as e:
-        st.error(f"Failed to fetch dataset from GitHub: {str(e)}")
+        st.warning(f"Failed to fetch dataset from GitHub: {str(e)}")
         st.write("Please ensure the URL is correct and the repository is public.")
-        st.stop()
+        return None
 
 # Function to load dataset
-def load_dataset(file_content, delimiter=';'):
+def load_dataset(file_content=None, delimiter=';'):
     try:
+        if not file_content:
+            return None
         data = []
         lines = file_content.decode('utf-8').splitlines()
 
         if not lines:
-            st.error("Dataset is empty.")
-            st.stop()
+            st.warning("Dataset is empty.")
+            return None
 
         st.write("First 5 lines of the dataset (for debugging):")
         st.write(lines[:5])
@@ -104,29 +111,41 @@ def load_dataset(file_content, delimiter=';'):
 
         df = pd.DataFrame(data, columns=['text', 'emotion'])
         if df.empty:
-            st.error("Dataset contains no valid data after parsing.")
-            st.stop()
+            st.warning("Dataset contains no valid data after parsing.")
+            return None
         return df
     except Exception as e:
-        st.error(f"Error loading dataset: {str(e)}")
-        st.stop()
+        st.warning(f"Error loading dataset: {str(e)}")
+        return None
+
+# Default small dataset as fallback
+default_dataset = [
+    "I feel so happy today;joy",
+    "This is making me sad;sadness",
+    "I am so angry right now;anger",
+    "I love this so much;love",
+    "This is surprising;surprise"
+]
 
 # GitHub URL and delimiter inputs
 github_url = st.text_input("Enter the raw GitHub URL for your dataset (e.g., https://raw.githubusercontent.com/yourusername/your-repo/main/data/emotions_data.txt)", value="")
 delimiter = st.text_input("Delimiter for dataset (default is ';')", value=';')
 
 # Load dataset
-if not github_url:
-    st.error("Please provide a GitHub URL for the dataset.")
-    st.write("To get the raw GitHub URL:")
-    st.write("1. Go to your GitHub repository.")
-    st.write("2. Navigate to the file (e.g., data/emotions_data.txt).")
-    st.write("3. Click the 'Raw' button.")
-    st.write("4. Copy the URL.")
-    st.stop()
+df = None
+if github_url:
+    dataset_content = fetch_dataset_from_github(github_url)
+    if dataset_content:
+        df = load_dataset(dataset_content, delimiter=delimiter)
 
-dataset_content = fetch_dataset_from_github(github_url)
-df = load_dataset(dataset_content, delimiter=delimiter)
+# Fallback to default dataset if GitHub fails
+if df is None:
+    st.write("Using default dataset with 5 samples as fallback.")
+    df = load_dataset(file_content='\n'.join(default_dataset).encode('utf-8'), delimiter=delimiter)
+
+if df is None:
+    st.error("Failed to load any dataset. Please check your GitHub URL and dataset format.")
+    st.stop()
 
 # Display dataset info
 st.write("Dataset loaded successfully. Total samples:", len(df))
@@ -134,6 +153,13 @@ st.write("Sample data:", df.head())
 
 # Preprocess text
 df['processed_text'] = df['text'].apply(preprocess_text)
+
+# Check for empty processed text
+df = df[df['processed_text'].str.strip() != '']
+if df.empty:
+    st.error("No valid data after preprocessing. All processed texts are empty.")
+    st.stop()
+
 st.write("Text preprocessing complete. Sample processed text:", df['processed_text'].iloc[0])
 
 # Load or train model
@@ -149,6 +175,10 @@ try:
     else:
         X = df['processed_text']
         y_emotion = df['emotion']
+
+        if len(df) < 2:
+            st.error("Not enough data to train the model. At least 2 samples are required.")
+            st.stop()
 
         vectorizer = TfidfVectorizer(max_features=5000)
         X_tfidf = vectorizer.fit_transform(X)
