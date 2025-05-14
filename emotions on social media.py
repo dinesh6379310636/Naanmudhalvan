@@ -4,13 +4,21 @@ import requests
 from io import StringIO
 from textblob import TextBlob
 
-# Function to fetch dataset from GitHub
+# Function to fetch dataset from GitHub with error handling
 def load_data():
     url = "https://raw.githubusercontent.com/naanmudhalvan/data/main/emotions_data.txt"
-    response = requests.get(url)
-    data = StringIO(response.text)
-    df = pd.read_csv(data, sep=';', names=['text', 'emotion'])
-    return df
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an error for bad status codes
+        data = StringIO(response.text)
+        df = pd.read_csv(data, sep=';', names=['text', 'emotion'])
+        return df
+    except requests.exceptions.HTTPError as e:
+        st.error(f"Failed to load dataset: {e}")
+        return pd.DataFrame(columns=['text', 'emotion'])
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
+        return pd.DataFrame(columns=['text', 'emotion'])
 
 # Function to analyze sentiment and map to emotions
 def analyze_emotion(text):
@@ -37,7 +45,10 @@ df = load_data()
 
 # Display dataset preview
 st.subheader("Dataset Preview")
-st.write(df.head())
+if not df.empty:
+    st.write(df.head())
+else:
+    st.write("No data loaded. Please check the dataset URL or file accessibility.")
 
 # Input for custom text analysis
 st.subheader("Analyze Your Own Text")
@@ -48,20 +59,23 @@ if st.button("Analyze"):
 
 # Analyze emotions in the dataset
 st.subheader("Emotion Analysis of Dataset")
-emotion_counts = {"sadness": 0, "joy": 0, "fear": 0, "anger": 0, "love": 0}
-for text in df['text']:
-    emotion = analyze_emotion(text)
-    emotion_counts[emotion] += 1
+if not df.empty:
+    emotion_counts = {"sadness": 0, "joy": 0, "fear": 0, "anger": 0, "love": 0}
+    for text in df['text']:
+        emotion = analyze_emotion(text)
+        emotion_counts[emotion] += 1
 
-# Display emotion counts
-st.write("Emotion Distribution in Dataset:")
-for emotion, count in emotion_counts.items():
-    st.write(f"{emotion.capitalize()}: {count} instances")
+    # Display emotion counts
+    st.write("Emotion Distribution in Dataset:")
+    for emotion, count in emotion_counts.items():
+        st.write(f"{emotion.capitalize()}: {count} instances")
 
-# Display sample texts for each emotion
-st.subheader("Sample Texts for Each Emotion")
-for emotion in emotion_counts.keys():
-    st.write(f"**{emotion.capitalize()}**")
-    sample_texts = df[df['text'].apply(analyze_emotion) == emotion]['text'].head(3).tolist()
-    for i, text in enumerate(sample_texts, 1):
-        st.write(f"{i}. {text}")
+    # Display sample texts for each emotion
+    st.subheader("Sample Texts for Each Emotion")
+    for emotion in emotion_counts.keys():
+        st.write(f"**{emotion.capitalize()}**")
+        sample_texts = df[df['text'].apply(analyze_emotion) == emotion]['text'].head(3).tolist()
+        for i, text in enumerate(sample_texts, 1):
+            st.write(f"{i}. {text}")
+else:
+    st.write("Cannot analyze emotions due to dataset loading failure.")
