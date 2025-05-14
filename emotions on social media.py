@@ -36,6 +36,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 import joblib
 import requests
+import time
 
 # Pre-download NLTK resources with error handling
 try:
@@ -61,20 +62,35 @@ def preprocess_text(text):
         st.error(f"Error preprocessing text: {str(e)}")
         return text
 
-# Function to fetch dataset from GitHub
-def fetch_dataset_from_github(github_url):
-    try:
-        response = requests.get(github_url)
-        response.raise_for_status()  # Raise an exception for bad status codes
-        st.write("Successfully fetched dataset from GitHub.")
-        return response.content
-    except requests.exceptions.RequestException as e:
-        st.error(f"Failed to fetch dataset from GitHub: {str(e)}")
-        st.write("Possible causes:")
-        st.write("- Incorrect GitHub URL: Ensure the URL is correct and the repository is public.")
-        st.write("- Network issues: Check your internet connection.")
-        st.write("- File not found: Verify the file exists at the specified path in your repository.")
-        return None
+# Function to fetch dataset from GitHub with retry
+def fetch_dataset_from_github(github_url, retries=3, delay=2):
+    for attempt in range(retries):
+        try:
+            response = requests.get(github_url, timeout=10)
+            response.raise_for_status()  # Raise an exception for bad status codes
+            st.write(f"Successfully fetched dataset from GitHub on attempt {attempt + 1}.")
+            return response.content
+        except requests.exceptions.RequestException as e:
+            st.warning(f"Attempt {attempt + 1} failed to fetch dataset: {str(e)}")
+            if attempt < retries - 1:
+                st.write(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+            else:
+                st.error("Failed to fetch dataset from GitHub after all retries.")
+                st.write("Possible causes:")
+                st.write("- Incorrect GitHub URL: Ensure the URL is correct and points to the raw file (starts with https://raw.githubusercontent.com).")
+                st.write("- Repository is private: See instructions below for private repositories.")
+                st.write("- Network issues: Check your internet connection.")
+                st.write("- File not found: Verify the file exists at the specified path in your repository.")
+                return None
+
+# Function to validate GitHub URL
+def validate_github_url(url):
+    if not url.startswith("https://raw.githubusercontent.com"):
+        st.error("Invalid GitHub URL. It must be a raw URL starting with 'https://raw.githubusercontent.com'.")
+        st.write("Example: https://raw.githubusercontent.com/yourusername/your-repo/main/data/emotions_data.txt")
+        return False
+    return True
 
 # Function to load dataset with configurable delimiter and encoding
 def load_dataset(file_content=None, delimiter=';'):
@@ -106,24 +122,31 @@ def load_dataset(file_content=None, delimiter=';'):
         st.write("First 5 lines of the dataset (for debugging):")
         st.write(lines[:5])
 
+        invalid_lines = 0
         for line in lines:
             if line.strip():
                 if delimiter not in line:
                     st.warning(f"Skipping line due to missing delimiter '{delimiter}': {line.strip()}")
+                    invalid_lines += 1
                     continue
                 parts = line.strip().split(delimiter)
                 if len(parts) != 2:
                     st.warning(f"Skipping invalid line (expected 2 parts, got {len(parts)}): {line.strip()}")
+                    invalid_lines += 1
                     continue
                 text, emotion = parts
                 if not text or not emotion:
                     st.warning(f"Skipping line with empty text or emotion: {line.strip()}")
+                    invalid_lines += 1
                     continue
                 data.append([text, emotion])
         
+        if invalid_lines > 0:
+            st.write(f"Skipped {invalid_lines} invalid lines. Continuing with valid data.")
+
         df = pd.DataFrame(data, columns=['text', 'emotion'])
         if df.empty:
-            st.error("Dataset contains no valid data after parsing.")
+            st.error("Dataset contains no valid data after parsing. All lines were invalid.")
             st.stop()
         return df
     except Exception as e:
@@ -152,10 +175,13 @@ if use_default_dataset:
     df = load_dataset(file_content='\n'.join(default_dataset).encode('utf-8'), delimiter=delimiter)
     st.write("Using default dataset with 5 samples.")
 elif github_url:
-    dataset_content = fetch_dataset_from_github(github_url)
-    if dataset_content:
-        df = load_dataset(file_content=dataset_content, delimiter=delimiter)
-        st.write("Dataset loaded from GitHub.")
+    if validate_github_url(github_url):
+        dataset_content = fetch_dataset_from_github(github_url)
+        if dataset_content:
+            df = load_dataset(file_content=dataset_content, delimiter=delimiter)
+            st.write("Dataset loaded from GitHub.")
+        else:
+            st.stop()
     else:
         st.stop()
 else:
@@ -165,6 +191,11 @@ else:
     st.write("2. Navigate to the file (e.g., data/emotions_data.txt).")
     st.write("3. Click the 'Raw' button.")
     st.write("4. Copy the URL (e.g., https://raw.githubusercontent.com/yourusername/your-repo/main/data/emotions_data.txt).")
+    st.write("")
+    st.write("**If your repository is private**, you'll need to use a personal access token:")
+    st.write("1. Generate a token on GitHub: Settings > Developer settings > Personal access tokens > Generate new token (select 'repo' scope).")
+    st.write("2. Modify the code to include the token in the fetch_dataset_from_github function:")
+    st.code('headers = {"Authorization": "token your_personal_access_token"}\nresponse = requests.get(github_url, headers=headers)')
     st.stop()
 
 # Display dataset info
