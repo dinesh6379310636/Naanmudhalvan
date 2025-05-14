@@ -6,12 +6,8 @@ required_libraries = {
     'nltk': 'nltk',
     'sklearn': 'scikit-learn',
     'streamlit': 'streamlit',
-    'matplotlib': 'matplotlib',
-    'seaborn': 'seaborn',
-    'numpy': 'numpy',
-    'scipy': 'scipy',
-    'joblib': 'joblib',
-    'requests': 'requests'
+    'requests': 'requests',
+    'joblib': 'joblib'
 }
 
 for lib_name, pkg_name in required_libraries.items():
@@ -20,25 +16,22 @@ for lib_name, pkg_name in required_libraries.items():
     except ImportError:
         st.error(f"Required library '{pkg_name}' is not installed.")
         st.write("Please install all required dependencies by running:")
-        st.code("pip install pandas nltk scikit-learn streamlit matplotlib seaborn numpy scipy joblib requests")
+        st.code("pip install pandas nltk scikit-learn streamlit requests joblib")
         st.stop()
 
 # Import libraries after dependency check
 import pandas as pd
 import nltk
 import re
-import matplotlib.pyplot as plt
-import seaborn as sns
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
-import joblib
 import requests
-import os
+import joblib
 
-# Pre-download NLTK resources with error handling
+# Pre-download NLTK resources
 try:
     nltk.download('punkt', quiet=True)
     nltk.download('stopwords', quiet=True)
@@ -70,46 +63,19 @@ def fetch_dataset_from_github(github_url):
         st.write("Successfully fetched dataset from GitHub.")
         return response.content
     except requests.exceptions.RequestException as e:
-        st.warning(f"Failed to fetch dataset from GitHub: {str(e)}")
-        return None
+        st.error(f"Failed to fetch dataset from GitHub: {str(e)}")
+        st.write("Please ensure the URL is correct and the repository is public.")
+        st.stop()
 
-# Function to load dataset with configurable delimiter and encoding
-def load_dataset(file_path=None, file_content=None, delimiter=';'):
+# Function to load dataset
+def load_dataset(file_content, delimiter=';'):
     try:
         data = []
-        encodings = ['utf-8', 'latin-1', 'utf-16']
-        lines = None
-
-        if file_path:
-            for encoding in encodings:
-                try:
-                    with open(file_path, 'r', encoding=encoding) as file:
-                        lines = file.readlines()
-                    st.write(f"Successfully read file with {encoding} encoding.")
-                    break
-                except UnicodeDecodeError:
-                    continue
-            if lines is None:
-                st.warning(f"Failed to read file {file_path} with tried encodings.")
-                return None
-        elif file_content:
-            for encoding in encodings:
-                try:
-                    lines = file_content.decode(encoding).splitlines()
-                    st.write(f"Successfully decoded dataset with {encoding} encoding.")
-                    break
-                except UnicodeDecodeError:
-                    continue
-            if lines is None:
-                st.warning(f"Failed to decode dataset with tried encodings.")
-                return None
-        else:
-            st.warning("No dataset content provided.")
-            return None
+        lines = file_content.decode('utf-8').splitlines()
 
         if not lines:
-            st.warning("Dataset is empty.")
-            return None
+            st.error("Dataset is empty.")
+            st.stop()
 
         st.write("First 5 lines of the dataset (for debugging):")
         st.write(lines[:5])
@@ -138,123 +104,72 @@ def load_dataset(file_path=None, file_content=None, delimiter=';'):
 
         df = pd.DataFrame(data, columns=['text', 'emotion'])
         if df.empty:
-            st.warning("Dataset contains no valid data after parsing.")
-            return None
+            st.error("Dataset contains no valid data after parsing.")
+            st.stop()
         return df
     except Exception as e:
-        st.warning(f"Error loading dataset: {str(e)}")
-        return None
+        st.error(f"Error loading dataset: {str(e)}")
+        st.stop()
 
-# Default small dataset
-default_dataset = [
-    "I feel so happy today;joy",
-    "This is making me sad;sadness",
-    "I am so angry right now;anger",
-    "I love this so much;love",
-    "This is surprising;surprise"
-]
-
-# Dataset loading logic
-data_dir = './data/'
-dataset_file = os.path.join(data_dir, 'emotions_data.txt')
-
-# GitHub URL, file upload, and delimiter inputs
-github_url = st.text_input("Enter the raw GitHub URL for your dataset (optional)", value="", help="Leave empty to use default dataset or local file.")
-uploaded_file = st.file_uploader("Upload your dataset (optional)", type=['txt'])
+# GitHub URL and delimiter inputs
+github_url = st.text_input("Enter the raw GitHub URL for your dataset (e.g., https://raw.githubusercontent.com/yourusername/your-repo/main/data/emotions_data.txt)", value="")
 delimiter = st.text_input("Delimiter for dataset (default is ';')", value=';')
 
 # Load dataset
-df = None
-
-# Try GitHub first if URL is provided
-if github_url:
-    dataset_content = fetch_dataset_from_github(github_url)
-    if dataset_content:
-        df = load_dataset(file_content=dataset_content, delimiter=delimiter)
-
-# Try local file if GitHub fails or no URL
-if df is None and os.path.exists(dataset_file):
-    df = load_dataset(file_path=dataset_file, delimiter=delimiter)
-
-# Try uploaded file if local file fails
-if df is None and uploaded_file:
-    df = load_dataset(file_content=uploaded_file.read(), delimiter=delimiter)
-
-# Use default dataset if all else fails
-if df is None:
-    st.write("Using default dataset with 5 samples.")
-    df = load_dataset(file_content='\n'.join(default_dataset).encode('utf-8'), delimiter=delimiter)
-
-if df is None:
-    st.error("Failed to load any dataset. Please check your GitHub URL, local file, or uploaded file.")
+if not github_url:
+    st.error("Please provide a GitHub URL for the dataset.")
+    st.write("To get the raw GitHub URL:")
+    st.write("1. Go to your GitHub repository.")
+    st.write("2. Navigate to the file (e.g., data/emotions_data.txt).")
+    st.write("3. Click the 'Raw' button.")
+    st.write("4. Copy the URL.")
     st.stop()
+
+dataset_content = fetch_dataset_from_github(github_url)
+df = load_dataset(dataset_content, delimiter=delimiter)
 
 # Display dataset info
 st.write("Dataset loaded successfully. Total samples:", len(df))
 st.write("Sample data:", df.head())
 
 # Preprocess text
-try:
-    df['processed_text'] = df['text'].apply(preprocess_text)
-    st.write("Text preprocessing complete. Sample processed text:", df['processed_text'].iloc[0])
-except Exception as e:
-    st.error(f"Error during text preprocessing: {str(e)}")
-    st.stop()
-
-# Map emotions to sentiment polarity
-emotion_to_sentiment = {
-    'sadness': 'negative',
-    'anger': 'negative',
-    'fear': 'negative',
-    'joy': 'positive',
-    'love': 'positive',
-    'surprise': 'neutral'
-}
-df['sentiment'] = df['emotion'].map(emotion_to_sentiment)
+df['processed_text'] = df['text'].apply(preprocess_text)
+st.write("Text preprocessing complete. Sample processed text:", df['processed_text'].iloc[0])
 
 # Load or train model
 vectorizer_path = 'vectorizer.pkl'
 emotion_model_path = 'emotion_model.pkl'
-sentiment_model_path = 'sentiment_model.pkl'
 
 try:
-    if os.path.exists(vectorizer_path) and os.path.exists(emotion_model_path) and os.path.exists(sentiment_model_path):
+    if os.path.exists(vectorizer_path) and os.path.exists(emotion_model_path):
         vectorizer = joblib.load(vectorizer_path)
         emotion_model = joblib.load(emotion_model_path)
-        sentiment_model = joblib.load(sentiment_model_path)
         X_tfidf = vectorizer.transform(df['processed_text'])
-        st.write("Loaded pre-trained models and vectorizer.")
+        st.write("Loaded pre-trained model and vectorizer.")
     else:
         X = df['processed_text']
         y_emotion = df['emotion']
-        y_sentiment = df['sentiment']
 
         vectorizer = TfidfVectorizer(max_features=5000)
         X_tfidf = vectorizer.fit_transform(X)
         st.write("TF-IDF vectorization complete. Shape of X_tfidf:", X_tfidf.shape)
 
         X_train, X_test, y_train_emotion, y_test_emotion = train_test_split(X_tfidf, y_emotion, test_size=0.2, random_state=42)
-        _, _, y_train_sentiment, y_test_sentiment = train_test_split(X_tfidf, y_sentiment, test_size=0.2, random_state=42)
 
         emotion_model = LogisticRegression(max_iter=1000)
         emotion_model.fit(X_train, y_train_emotion)
         st.write("Emotion model trained successfully.")
 
-        sentiment_model = LogisticRegression(max_iter=1000)
-        sentiment_model.fit(X_train, y_train_sentiment)
-        st.write("Sentiment model trained successfully.")
-
         joblib.dump(vectorizer, vectorizer_path)
         joblib.dump(emotion_model, emotion_model_path)
-        joblib.dump(sentiment_model, sentiment_model_path)
-        st.write("Models and vectorizer saved for future use.")
+        st.write("Model and vectorizer saved for future use.")
 except Exception as e:
     st.error(f"Error during model training or loading: {str(e)}")
     st.stop()
 
 # Streamlit App
-st.title("Decoding Emotions in Social Media Conversations")
-st.write("Enter a social media post to analyze its emotion and sentiment.")
+st.title("Emotion Detection in Social Media Conversations")
+st.write("Enter a social media post to analyze its emotion.")
 
 user_input = st.text_area("Enter your text:", "I feel so happy today!")
 
@@ -274,11 +189,9 @@ if st.button("Analyze"):
         input_tfidf = vectorizer.transform([processed_input])
 
         predicted_emotion = emotion_model.predict(input_tfidf)[0]
-        predicted_sentiment = sentiment_model.predict(input_tfidf)[0]
 
         st.subheader("Analysis Results")
         st.write(f"**Predicted Emotion**: {predicted_emotion}")
-        st.write(f"**Predicted Sentiment**: {predicted_sentiment}")
 
         emotion_probs = emotion_model.predict_proba(input_tfidf)[0]
         emotion_labels = emotion_model.classes_
@@ -287,13 +200,3 @@ if st.button("Analyze"):
             st.write(f"{label}: {prob:.2%}")
     except Exception as e:
         st.error(f"Error during analysis: {str(e)}")
-
-st.subheader("Dataset Emotion Distribution")
-try:
-    fig, ax = plt.subplots()
-    sns.countplot(data=df, x='emotion', ax=ax)
-    plt.xticks(rotation=45)
-    st.pyplot(fig)
-    plt.clf()
-except Exception as e:
-    st.error(f"Error rendering visualization: {str(e)}")
