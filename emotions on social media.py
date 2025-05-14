@@ -1,189 +1,88 @@
-import os
-import json
-import streamlit as st
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import re
 from sklearn.feature_extraction.text import TfidfVectorizer
-from xgboost import XGBClassifier
-from textblob import TextBlob
-import joblib
-from sklearn.preprocessing import LabelEncoder
+import streamlit as st
 
-# Custom CSS for styling (unchanged)
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 36px;
-        font-weight: bold;
-        color: #2c3e50;
-        text-align: center;
-        margin-bottom: 20px;
-    }
-    .section-header {
-        font-size: 24px;
-        font-weight: bold;
-        color: #34495e;
-        margin-top: 20px;
-        margin-bottom: 10px;
-    }
-    .stButton>button {
-        background-color: #3498db;
-        color: white;
-        border-radius: 8px;
-        padding: 10px 20px;
-        font-size: 16px;
-        border: none;
-    }
-    .stButton>button:hover {
-        background-color: #2980b9;
-    }
-    .prediction-box {
-        background-color: #d3d3d3;
-        padding: 20px;
-        border-radius: 10px;
-        text-align: center;
-        font-size: 18px;
-        margin-top: 20px;
-        color: #2c3e50;
-    }
-    .prediction-box strong {
-        color: #2c3e50;
-    }
-    .sidebar .sidebar-content {
-        background-color: #f8f9fa;
-        padding: 20px;
-    }
-    .metrics-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 10px;
-    }
-    .metrics-table th, .metrics-table td {
-        border: 1px solid #ddd;
-        padding: 8px;
-        text-align: center;
-    }
-    .metrics-table th {
-        background-color: #f2f2f2;
-        font-weight: bold;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Function to preprocess text data
+def preprocess_text(text):
+    # Handle non-string values
+    if not isinstance(text, str):
+        text = str(text)
+    # Convert to lowercase
+    text = text.lower()
+    # Remove HTML tags and URLs
+    text = re.sub(r'<.*?>|http\S+', '', text)
+    # Remove special characters and numbers, keep only letters and spaces
+    text = re.sub(r'[^a-z\s]', '', text)
+    # Remove extra whitespace
+    text = ' '.join(text.split())
+    return text
 
-# Main title
-st.markdown('<div class="main-header">Emotion Detection in Social Media</div>', unsafe_allow_html=True)
+# Load your dataset (adjust this based on how you're loading your data)
+# For example, if loading from "val.txt", you might need to parse it manually
+# Here, I'll assume df is already loaded with 'text' and 'label' columns
+# df = pd.read_csv('your_file.csv')  # Uncomment and adjust as needed
 
-# Sidebar for user input
-with st.sidebar:
-    st.header("Input Social Media Post")
-    st.markdown('<div class="section-header">Post Details</div>', unsafe_allow_html=True)
-    user_post = st.text_area("Enter a social media post", height=150, placeholder="Type your post here...")
+# For demonstration, let's simulate loading "val.txt" data
+# If you have a different loading mechanism, replace this part
+data = []
+with open('val.txt', 'r') as file:  # Adjust path as needed
+    for line in file:
+        # Assuming each line is in the format: "text;emotion"
+        if line.strip():
+            text, emotion = line.strip().split(';')
+            data.append({'text': text, 'label': emotion})
+df = pd.DataFrame(data)
 
-# Load dataset directly from the repository
-st.write("### Model Training and Evaluation")
+# Display initial data for debugging (Streamlit)
+st.write("Initial DataFrame:")
+st.write(df.head())
+st.write("Number of rows:", len(df))
 
-# Ensure the data directory exists (though it should already be in the repo)
-data_path = "./data/train.txt"
-if not os.path.exists(data_path):
-    st.error(f"Dataset file not found at {data_path}. Please ensure train.txt is uploaded to the 'data' directory in your GitHub repository.")
+# Step 1: Clean the data
+# Replace NaN with empty strings
+df['text'] = df['text'].fillna("")
+# Convert all entries to strings and preprocess
+df['text'] = df['text'].apply(preprocess_text)
+# Remove rows where text is empty after preprocessing
+df = df[df['text'].str.strip() != ""].reset_index(drop=True)
+
+# Display cleaned data for debugging
+st.write("Cleaned DataFrame:")
+st.write(df.head())
+st.write("Number of rows after cleaning:", len(df))
+
+# Step 2: Check if DataFrame is empty after cleaning
+if df.empty:
+    st.error("Error: No valid text data remains after preprocessing. Please check your input data.")
 else:
-    with st.spinner("Loading dataset..."):
-        # Load the dataset (tab-separated, no header)
-        df = pd.read_csv(data_path, sep='\t', names=['text', 'label'])
+    # Step 3: Initialize the vectorizer
+    vectorizer = TfidfVectorizer(
+        stop_words='english',  # Remove common English stop words
+        max_features=5000,     # Limit the number of features to prevent memory issues
+        min_df=1,              # Include words that appear in at least 1 document
+        max_df=0.95            # Ignore words that appear in >95% of documents
+    )
 
-    # Preprocess dataset
-    df.dropna(subset=['text', 'label'], inplace=True)
-    df.reset_index(drop=True, inplace=True)
+    # Step 4: Transform the text data
+    try:
+        # Transform the text into a sparse matrix (avoid .toarray() unless necessary)
+        X = vectorizer.fit_transform(df['text'])
+        st.write("Shape of transformed data (X):", X.shape)
+        st.write("Vocabulary size:", len(vectorizer.vocabulary_))
 
-    # Map numeric labels to emotion names (based on dair-ai/emotion dataset)
-    emotion_mapping = {
-        0: 'sadness',
-        1: 'joy',
-        2: 'love',
-        3: 'anger',
-        4: 'fear',
-        5: 'surprise'
-    }
-    # Convert labels to numeric if they are already in text form (e.g., 'sadness')
-    df['label_numeric'] = df['label'].map({v: k for k, v in emotion_mapping.items()})
-    df['emotion'] = df['label_numeric'].map(emotion_mapping)
+        # If you need a dense array (e.g., for certain models), uncomment this:
+        # X = X.toarray()
+        # st.write("Shape of dense array:", X.shape)
 
-    # Encode emotion labels for training
-    label_encoder = LabelEncoder()
-    df['emotion_encoded'] = label_encoder.fit_transform(df['emotion'])
+        # Example: Display the feature names (vocabulary)
+        st.write("Sample feature names:", vectorizer.get_feature_names_out()[:10])
 
-    # Feature extraction using TF-IDF
-    vectorizer = TfidfVectorizer(max_features=5000, stop_words='english')
-    X = vectorizer.fit_transform(df['text']).toarray()
-    y = df['emotion_encoded']
+        # Step 5: Proceed with your analysis (e.g., model training)
+        # Example: If you have labels, you can proceed with classification
+        y = df['label']  # Assuming 'label' column contains the emotions
+        st.write("Labels:", y.head())
 
-    # Split data
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42, stratify=y)
-
-    # Model training and evaluation
-    model_path = "emotion_model_xgb.pkl"
-    metrics_path = "emotion_metrics.json"
-
-    if not os.path.exists(model_path):
-        with st.spinner("Training model..."):
-            model = XGBClassifier(use_label_encoder=False, eval_metric='mlogloss')
-            model.fit(X_train, y_train)
-            joblib.dump(model, model_path)
-            
-            y_pred = model.predict(X_test)
-            metrics = {
-                'Accuracy': accuracy_score(y_test, y_pred),
-                'Precision': precision_score(y_test, y_pred, average='weighted'),
-                'Recall': recall_score(y_test, y_pred, average='weighted'),
-                'F1 Score': f1_score(y_test, y_pred, average='weighted')
-            }
-            with open(metrics_path, 'w') as f:
-                json.dump(metrics, f)
-            st.write("Model Evaluation Results (computed during training):")
-            st.write(metrics)
-
-    # Load model
-    model = joblib.load(model_path)
-
-    # Display evaluation metrics
-    if os.path.exists(metrics_path):
-        with open(metrics_path, 'r') as f:
-            metrics = json.load(f)
-        st.write("#### Model Evaluation Metrics (XGBoost)")
-        
-        metrics_df = pd.DataFrame.from_dict(metrics, orient='index', columns=['Value'])
-        metrics_df.reset_index(inplace=True)
-        metrics_df.columns = ['Metric', 'Value']
-        
-        metrics_df['Value'] = metrics_df['Value'].apply(lambda x: f"{x:.4f}")
-
-        metrics_html = metrics_df.to_html(index=False, classes='metrics-table')
-        st.markdown(metrics_html, unsafe_allow_html=True)
-    else:
-        st.write("Model evaluation metrics are not available. Please train the model first.")
-
-    # Predict emotion for user input
-    st.write("### Predict Emotion")
-    if st.button("Analyze Emotion"):
-        if user_post.strip() == "":
-            st.error("Please enter a social media post.")
-        else:
-            # Preprocess user input
-            user_vector = vectorizer.transform([user_post]).toarray()
-            
-            # Predict emotion
-            prediction = model.predict(user_vector)[0]
-            predicted_emotion = label_encoder.inverse_transform([prediction])[0]
-            
-            # Get sentiment polarity using TextBlob
-            sentiment = TextBlob(user_post).sentiment.polarity
-            sentiment_label = "Positive" if sentiment > 0 else "Negative" if sentiment < 0 else "Neutral"
-
-            # Display results
-            st.markdown(f"""
-            <div class="prediction-box">
-                <strong>Predicted Emotion:</strong> {predicted_emotion}<br>
-                <strong>Sentiment:</strong> {sentiment_label}
-            </div>
-            """, unsafe_allow_html=True)
+    except ValueError as e:
+        st.error(f"Error during vectorization: {str(e)}")
+        st.write("Check your data for empty or invalid entries.")
