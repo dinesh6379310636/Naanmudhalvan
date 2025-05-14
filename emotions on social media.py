@@ -1,6 +1,6 @@
 import streamlit as st
 
-# Dependency check (removed kaggle)
+# Dependency check
 required_libraries = {
     'pandas': 'pandas',
     'nltk': 'nltk',
@@ -60,15 +60,38 @@ def preprocess_text(text):
         st.error(f"Error preprocessing text: {str(e)}")
         return text
 
-# Function to load dataset from a text file
-def load_dataset(file_path=None, file_content=None):
+# Function to load dataset with configurable delimiter and encoding
+def load_dataset(file_path=None, file_content=None, delimiter=';'):
     try:
         data = []
-        if file_path:  # Local file
-            with open(file_path, 'r', encoding='utf-8') as file:
-                lines = file.readlines()
-        elif file_content:  # Uploaded file
-            lines = file_content.decode('utf-8').splitlines()
+        encodings = ['utf-8', 'latin-1', 'utf-16']
+        lines = None
+
+        if file_path:
+            # Try different encodings for local file
+            for encoding in encodings:
+                try:
+                    with open(file_path, 'r', encoding=encoding) as file:
+                        lines = file.readlines()
+                    st.write(f"Successfully read file with {encoding} encoding.")
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if lines is None:
+                st.error(f"Failed to read file {file_path} with tried encodings: {', '.join(encodings)}.")
+                st.stop()
+        elif file_content:
+            # Try different encodings for uploaded file
+            for encoding in encodings:
+                try:
+                    lines = file_content.decode(encoding).splitlines()
+                    st.write(f"Successfully decoded uploaded file with {encoding} encoding.")
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if lines is None:
+                st.error(f"Failed to decode uploaded file with tried encodings: {', '.join(encodings)}.")
+                st.stop()
         else:
             st.error("No dataset provided. Please specify a file path or upload a dataset.")
             st.stop()
@@ -77,14 +100,22 @@ def load_dataset(file_path=None, file_content=None):
             st.error("Dataset is empty.")
             st.stop()
 
+        # Debug: Show first few lines
+        st.write("First 5 lines of the dataset (for debugging):")
+        st.write(lines[:5])
+
         for line in lines:
             if line.strip():
-                if ';' not in line:
-                    st.warning(f"Skipping malformed line: {line.strip()}")
+                if delimiter not in line:
+                    st.warning(f"Skipping line due to missing delimiter '{delimiter}': {line.strip()}")
                     continue
-                text, emotion = line.strip().split(';')
+                parts = line.strip().split(delimiter)
+                if len(parts) != 2:
+                    st.warning(f"Skipping invalid line (expected 2 parts, got {len(parts)}): {line.strip()}")
+                    continue
+                text, emotion = parts
                 if not text or not emotion:
-                    st.warning(f"Skipping invalid line: {line.strip()}")
+                    st.warning(f"Skipping line with empty text or emotion: {line.strip()}")
                     continue
                 data.append([text, emotion])
         
@@ -97,25 +128,44 @@ def load_dataset(file_path=None, file_content=None):
         st.error(f"Error loading dataset: {str(e)}")
         st.stop()
 
+# Default small dataset for testing
+default_dataset = [
+    "I feel so happy today;joy",
+    "This is making me sad;sadness",
+    "I am so angry right now;anger",
+    "I love this so much;love",
+    "This is surprising;surprise"
+]
+
 # Dataset loading logic
 data_dir = './data/'
 dataset_file = os.path.join(data_dir, 'emotions_data.txt')
 
+# Allow user to specify delimiter
+delimiter = st.text_input("Delimiter for dataset (default is ';')", value=';')
+
 # Add file upload option for deployment
 uploaded_file = st.file_uploader("Upload your dataset (emotions_data.txt)", type=['txt'])
 
-if uploaded_file:
-    # Use uploaded file (e.g., for Streamlit Cloud)
-    df = load_dataset(file_content=uploaded_file.read())
+# Add option to use default dataset for testing
+use_default_dataset = st.checkbox("Use default small dataset for testing (5 samples)", value=False)
+
+if use_default_dataset:
+    df = load_dataset(file_content='\n'.join(default_dataset).encode('utf-8'), delimiter=delimiter)
+    st.write("Using default dataset with 5 samples.")
+elif uploaded_file:
+    df = load_dataset(file_content=uploaded_file.read(), delimiter=delimiter)
     st.write("Dataset loaded from uploaded file.")
 elif os.path.exists(dataset_file):
-    # Use local file
-    df = load_dataset(file_path=dataset_file)
+    df = load_dataset(file_path=dataset_file, delimiter=delimiter)
     st.write("Dataset loaded from local file: data/emotions_data.txt")
 else:
     st.error("Dataset file not found at data/emotions_data.txt, and no file was uploaded.")
-    st.write("Please place emotions_data.txt in the ./data/ folder, or upload it using the file uploader above.")
-    st.write("Expected format: Each line should be 'text;emotion' (e.g., 'I feel so happy today;joy').")
+    st.write("Please ensure one of the following:")
+    st.write("- Place emotions_data.txt in the ./data/ folder.")
+    st.write("- Upload the dataset using the file uploader above.")
+    st.write("- Check 'Use default small dataset' to test with a small sample dataset.")
+    st.write("Expected format: Each line should be 'text<delimiter>emotion' (e.g., 'I feel so happy today;joy').")
     st.stop()
 
 # Display dataset info
