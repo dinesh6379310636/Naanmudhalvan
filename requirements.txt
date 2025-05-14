@@ -1,4 +1,7 @@
+pip install 
 streamlit
 pandas
-requests
+sklearn
+xgboost
+joblib 
 textblob
